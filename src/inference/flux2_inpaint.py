@@ -23,6 +23,8 @@ import logging
 import os
 import sys
 import time
+import io
+import requests
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
