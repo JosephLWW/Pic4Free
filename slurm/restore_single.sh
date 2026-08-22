@@ -12,9 +12,6 @@
 
 set -Eeuo pipefail
 
-# Argumento opcional: índice de imagen para depuración
-TASK_ID="${1:-0}"
-
 echo "=============================================================================="
 echo "Iniciando Job Individual Pic4Free: Job ${SLURM_JOB_ID} | Task ID: ${TASK_ID}"
 echo "Fecha y Hora: $(date '+%Y-%m-%d %H:%M:%S')"
@@ -97,7 +94,10 @@ if torch.cuda.is_available():
     print(f"CUDA runtime: {torch.version.cuda}")
 PY
 
-OUTPUT_BASE="${WORKDIR}/data/output/run_${SLURM_JOB_ID}"
+JOB_ID="${SLURM_JOB_ID}"
+TASK_ID="${1:-${SLURM_ARRAY_TASK_ID:-0}}"
+OUTPUT_BASE="${WORKDIR}/data/output/run_${JOB_ID}"
+
 mkdir -p "${OUTPUT_BASE}/restored" \
          "${OUTPUT_BASE}/masks" \
          "${OUTPUT_BASE}/intermediates" \

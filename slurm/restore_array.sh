@@ -128,7 +128,7 @@ fi
 
 "${PYTHON_BIN}" src/main.py \
     --task_id "${TASK_ID}" \
-    --job_id "${SLURM_JOB_ID}" \
+    --job_id "${JOB_ID}" \
     --input_dir "${WORKDIR}/data/input" \
     --identity_a_dir "${WORKDIR}/data/identity_person_A" \
     --identity_b_dir "${WORKDIR}/data/identity_person_B" \
