@@ -13,7 +13,7 @@
 set -Eeuo pipefail
 
 echo "=============================================================================="
-echo "Iniciando Job Individual Pic4Free: Job ${SLURM_JOB_ID} | Task ID: ${TASK_ID}"
+echo "Iniciando Job Individual Pic4Free"
 echo "Fecha y Hora: $(date '+%Y-%m-%d %H:%M:%S')"
 echo "=============================================================================="
 

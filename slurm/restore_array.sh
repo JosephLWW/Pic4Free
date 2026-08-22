@@ -14,7 +14,7 @@
 set -Eeuo pipefail
 
 echo "=============================================================================="
-echo "Iniciando Tarea Slurm Array Pic4Free: Job ${SLURM_ARRAY_JOB_ID:-$SLURM_JOB_ID} | Task ${SLURM_ARRAY_TASK_ID:-0}"
+echo "Iniciando Tarea Slurm Array Pic4Free"
 echo "Fecha y Hora: $(date '+%Y-%m-%d %H:%M:%S')"
 echo "=============================================================================="
 
