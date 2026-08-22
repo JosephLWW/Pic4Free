@@ -2,7 +2,7 @@
 #SBATCH --job-name=Pic4Free_setup_env
 #SBATCH --output=slurm_logs/setup_%j.out
 #SBATCH --error=slurm_logs/setup_%j.err
-#SBATCH --partition=gpu_h100_short
+#SBATCH --partition=gpu_a100_short
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
