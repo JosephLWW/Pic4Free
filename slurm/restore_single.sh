@@ -5,17 +5,14 @@
 #SBATCH --partition=gpu_h100_short
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=8               # 8 cores para OpenCV, SSIM y dataloading
-#SBATCH --mem=80GB                      # Memoria del nodo
-#SBATCH --gres=gpu:1                    # 1 GPU H100
-#SBATCH --time=0:30:00                  # Tiempo máximo asignado al job de depuración
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=80GB
+#SBATCH --gres=gpu:1
+#SBATCH --time=0:30:00
 
-# ==============================================================================
-# SurfAI - HPC Slurm Single Image Execution Script (Interactive & Debugging)
-# Permite pasar el índice de imagen como argumento: sbatch slurm/restore_single.sh 0
-# ==============================================================================
+set -Eeuo pipefail
 
-# Argumento opcional: índice de tarea / imagen (por defecto 0)
+# Argumento opcional: índice de imagen para depuración
 TASK_ID="${1:-0}"
 
 echo "=============================================================================="
@@ -23,18 +20,33 @@ echo "Iniciando Job Individual SurfAI: Job ${SLURM_JOB_ID} | Task ID: ${TASK_ID}
 echo "Fecha y Hora: $(date '+%Y-%m-%d %H:%M:%S')"
 echo "=============================================================================="
 
-# 1. Limpieza de entorno y carga de módulos HPC
 unset PYTHONPATH
+unset VIRTUAL_ENV
+hash -r
+
 module purge
 module load devel/cuda/12.8
 module load devel/python/3.12.3-gnu-14.2
 
-# 2. Resolución de directorios de trabajo
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORKDIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-VENV="${WORKDIR}/.venv"
+# Resolver el repositorio desde el directorio de envío de Slurm
+WORKDIR="${SLURM_SUBMIT_DIR:?SLURM_SUBMIT_DIR no está definido}"
+WORKDIR="$(cd "${WORKDIR}" && pwd)"
+
+# Validar estructura mínima del repositorio
+for required in "requirements.txt" "src/main.py"; do
+    if [[ ! -e "${WORKDIR}/${required}" ]]; then
+        echo "ERROR: faltan ${required} dentro de ${WORKDIR}" >&2
+        exit 1
+    fi
+done
 
 cd "${WORKDIR}"
+
+# Directorios de trabajo dentro del repositorio
+mkdir -p "${WORKDIR}/slurm_logs" \
+         "${WORKDIR}/.cache/huggingface" \
+         "${WORKDIR}/.cache/torch" \
+         "${WORKDIR}/.cache/insightface"
 
 export HF_HOME="${WORKDIR}/.cache/huggingface"
 export TORCH_HOME="${WORKDIR}/.cache/torch"
@@ -42,39 +54,66 @@ export INSIGHTFACE_HOME="${WORKDIR}/.cache/insightface"
 export PYTHONUNBUFFERED=1
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
 
-mkdir -p "${HF_HOME}" "${TORCH_HOME}" "${INSIGHTFACE_HOME}" slurm_logs
+VENV="${WORKDIR}/.venv"
+PYTHON_BIN="${VENV}/bin/python"
+PIP_BIN="${VENV}/bin/pip"
+REQ_HASH_FILE="${VENV}/.requirements.sha256"
 
-# 3. Activación del entorno virtual
-if [ ! -d "${VENV}" ]; then
-    echo "[SurfAI] Creando entorno virtual en ${VENV}..."
+# Crear venv si no existe o si está corrupto
+if [[ ! -x "${PYTHON_BIN}" ]]; then
+    echo "[SurfAI] Entorno virtual no encontrado en ${VENV}. Creando entorno..."
     python3 -m venv "${VENV}"
-    source "${VENV}/bin/activate"
-    pip install --quiet --upgrade pip setuptools wheel
-    pip install --quiet -r "${WORKDIR}/requirements.txt"
-else
-    source "${VENV}/bin/activate"
 fi
 
-# 4. Creación del directorio de salida específico para este JOB ID
-OUTPUT_BASE="${WORKDIR}/data/output/run_${SLURM_JOB_ID}"
-mkdir -p "${OUTPUT_BASE}/restored"
-mkdir -p "${OUTPUT_BASE}/masks"
-mkdir -p "${OUTPUT_BASE}/intermediates"
-mkdir -p "${OUTPUT_BASE}/metrics"
-mkdir -p "${OUTPUT_BASE}/logs"
+if [[ ! -x "${PYTHON_BIN}" ]]; then
+    echo "ERROR: no se pudo crear el entorno virtual en ${VENV}" >&2
+    exit 1
+fi
 
-# 5. Telemetría
+# Chequeo explícito del entorno
+echo "Python real: $("${PYTHON_BIN}" -c 'import sys; print(sys.executable)')"
+echo "Python versión: $("${PYTHON_BIN}" -c 'import sys; print(sys.version.split()[0])')"
+
+# Reutilizar dependencias si el requirements.txt no ha cambiado
+REQ_HASH="$(sha256sum "${WORKDIR}/requirements.txt" | awk '{print $1}')"
+
+if [[ ! -f "${REQ_HASH_FILE}" || "$(cat "${REQ_HASH_FILE}" 2>/dev/null || echo)" != "${REQ_HASH}" ]]; then
+    echo "[SurfAI] Instalando o actualizando dependencias..."
+    "${PYTHON_BIN}" -m pip install --disable-pip-version-check --upgrade pip setuptools wheel
+    "${PYTHON_BIN}" -m pip install --disable-pip-version-check -r "${WORKDIR}/requirements.txt"
+    printf '%s\n' "${REQ_HASH}" > "${REQ_HASH_FILE}"
+else
+    echo "[SurfAI] Requisitos ya instalados; reutilizando el entorno virtual."
+fi
+
+echo "[SurfAI] Verificando PyTorch/CUDA..."
+"${PYTHON_BIN}" - <<'PY'
+import torch
+print(f"PyTorch: {torch.__version__}")
+print(f"CUDA disponible: {torch.cuda.is_available()}")
+if torch.cuda.is_available():
+    print(f"GPU: {torch.cuda.get_device_name(0)}")
+    print(f"Capacidad: {torch.cuda.get_device_capability(0)}")
+    print(f"CUDA runtime: {torch.version.cuda}")
+PY
+
+OUTPUT_BASE="${WORKDIR}/data/output/run_${SLURM_JOB_ID}"
+mkdir -p "${OUTPUT_BASE}/restored" \
+         "${OUTPUT_BASE}/masks" \
+         "${OUTPUT_BASE}/intermediates" \
+         "${OUTPUT_BASE}/metrics" \
+         "${OUTPUT_BASE}/logs"
+
 echo "=============================================================================="
 echo "Job ID:            ${SLURM_JOB_ID}"
 echo "Task ID (Índice):  ${TASK_ID}"
 echo "Nodo:              ${SLURMD_NODENAME}"
-echo "Python:            $(which python)"
-echo "GPU:               $(python -c 'import torch; print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else "ERROR: Sin GPU")')"
+echo "Python:            $("${PYTHON_BIN}" -c 'import sys; print(sys.executable)')"
+echo "GPU:               $("${PYTHON_BIN}" -c 'import torch; print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else "ERROR: Sin GPU")')"
 echo "Directorio Salida: ${OUTPUT_BASE}"
 echo "=============================================================================="
 
-# 6. Ejecución del pipeline para una sola imagen
-python3 src/main.py \
+"${PYTHON_BIN}" src/main.py \
     --task_id "${TASK_ID}" \
     --job_id "${SLURM_JOB_ID}" \
     --input_dir "${WORKDIR}/data/input" \
@@ -89,12 +128,11 @@ python3 src/main.py \
 
 EXIT_CODE=$?
 
-# 7. Copia de logs
-if [ -f "slurm_logs/slurm_${SLURM_JOB_ID}.out" ]; then
-    cp "slurm_logs/slurm_${SLURM_JOB_ID}.out" "${OUTPUT_BASE}/logs/" 2>/dev/null || true
+if [[ -f "${WORKDIR}/slurm_logs/slurm_${SLURM_JOB_ID}.out" ]]; then
+    cp "${WORKDIR}/slurm_logs/slurm_${SLURM_JOB_ID}.out" "${OUTPUT_BASE}/logs/" 2>/dev/null || true
 fi
-if [ -f "slurm_logs/slurm_${SLURM_JOB_ID}.err" ]; then
-    cp "slurm_logs/slurm_${SLURM_JOB_ID}.err" "${OUTPUT_BASE}/logs/" 2>/dev/null || true
+if [[ -f "${WORKDIR}/slurm_logs/slurm_${SLURM_JOB_ID}.err" ]]; then
+    cp "${WORKDIR}/slurm_logs/slurm_${SLURM_JOB_ID}.err" "${OUTPUT_BASE}/logs/" 2>/dev/null || true
 fi
 
 echo "=============================================================================="

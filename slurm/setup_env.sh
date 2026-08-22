@@ -10,45 +10,44 @@
 #SBATCH --gres=gpu:1
 #SBATCH --time=0:30:00
 
-# ==============================================================================
-# SurfAI - HPC Environment Provisioning & Pre-Caching Script
-# Descarga y precalienta pesos de FLUX 2, InsightFace y paquetes en .venv
-# ==============================================================================
-
-echo "=============================================================================="
-echo "Iniciando Aprovisionamiento de Entorno SurfAI en Nodo: ${SLURMD_NODENAME}"
-echo "=============================================================================="
+set -euo pipefail
 
 unset PYTHONPATH
+unset VIRTUAL_ENV
+hash -r
+
 module purge
 module load devel/cuda/12.8
 module load devel/python/3.12.3-gnu-14.2
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORKDIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-VENV="${WORKDIR}/.venv"
+# Slurm debe recibir este directorio como directorio de envío.
+WORKDIR="${SLURM_SUBMIT_DIR:?SLURM_SUBMIT_DIR no está definido}"
+WORKDIR="$(cd "${WORKDIR}" && pwd)"
+
+if [[ ! -f "${WORKDIR}/requirements.txt" ]]; then
+    echo "ERROR: requirements.txt no existe en ${WORKDIR}" >&2
+    echo "Envíe el job desde la raíz del repositorio." >&2
+    exit 1
+fi
 
 cd "${WORKDIR}"
 
-export HF_HOME="${WORKDIR}/.cache/huggingface"
-export TORCH_HOME="${WORKDIR}/.cache/torch"
-export INSIGHTFACE_HOME="${WORKDIR}/.cache/insightface"
+VENV="${WORKDIR}/.venv"
 
-mkdir -p "${HF_HOME}" "${TORCH_HOME}" "${INSIGHTFACE_HOME}" slurm_logs
-
-if [ ! -d "${VENV}" ]; then
-    echo "[Setup] Creando nuevo entorno virtual en ${VENV}..."
+if [[ ! -x "${VENV}/bin/python" ]]; then
     python3 -m venv "${VENV}"
 fi
 
-source "${VENV}/bin/activate"
+PYTHON="${VENV}/bin/python"
+PIP="${VENV}/bin/pip"
 
-echo "[Setup] Actualizando pip e instalando dependencias..."
-pip install --upgrade pip setuptools wheel
-pip install -r "${WORKDIR}/requirements.txt"
+echo "Python: $("${PYTHON}" -c 'import sys; print(sys.executable)')"
+echo "pip:    $("${PIP}" --version)"
 
-echo "[Setup] Verificando compatibilidad con PyTorch CUDA 12.8..."
-python3 -c '
+"${PYTHON}" -m pip install --upgrade pip setuptools wheel
+"${PYTHON}" -m pip install -r "${WORKDIR}/requirements.txt"
+
+"${PYTHON}" -c '
 import torch
 print(f"PyTorch Version: {torch.__version__}")
 print(f"CUDA Available:  {torch.cuda.is_available()}")
