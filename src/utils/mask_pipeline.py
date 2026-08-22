@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 ==============================================================================
-SurfAI - Stage 1: Dynamic Differential Mask Pipeline (SSIM + Morphology)
+Pic4Free - Stage 1: Dynamic Differential Mask Pipeline (SSIM + Morphology)
 ==============================================================================
 Industrial pipeline to generate binary and soft alpha masks isolating complex,
 semi-opaque, and opaque watermarks by comparing degraded high-res images
@@ -37,7 +37,7 @@ logging.basicConfig(
     format="[%(asctime)s] [%(levelname)s] [%(name)s] %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
-logger = logging.getLogger("SurfAI.MaskPipeline")
+logger = logging.getLogger("Pic4Free.MaskPipeline")
 
 
 @dataclass
@@ -407,7 +407,7 @@ def generate_watermark_mask(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="SurfAI Stage 1: SSIM Differential Watermark Mask Generator",
+        description="Pic4Free Stage 1: SSIM Differential Watermark Mask Generator",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("--image_id", "--task_id", "-i", type=str, required=True,

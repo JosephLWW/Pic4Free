@@ -1,4 +1,4 @@
-# SurfAI: Multi-Person Watermark Restoration & Facial Identity Inpainting Pipeline
+# Pic4Free: Multi-Person Watermark Restoration & Facial Identity Inpainting Pipeline
 ### *High-Performance Computing (HPC) Industrial Architecture — State of the Art (August 2026)*
 
 [![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-blue.svg)](https://www.python.org/)
@@ -11,17 +11,17 @@
 
 ## 1. Visión General y Propósito del Repositorio
 
-**SurfAI** es una infraestructura computacional de nivel industrial y de alto rendimiento (HPC) diseñada para la **restauración automatizada y de ultra-alta fidelidad de fotografías de alta resolución degradadas por marcas de agua densas, semitransparentes u opacas**, con un enfoque primordial en la **preservación y reconstrucción de la identidad facial multi-persona**.
+**Pic4Free** es una infraestructura computacional de nivel industrial y de alto rendimiento (HPC) diseñada para la **restauración automatizada y de ultra-alta fidelidad de fotografías de alta resolución degradadas por marcas de agua densas, semitransparentes u opacas**, con un enfoque primordial en la **preservación y reconstrucción de la identidad facial multi-persona**.
 
 ### El Problema Crítico
-El dataset objetivo comprende una colección de ~100 fotografías profesionales y personales de alto valor sentimental donde aparecen **hasta dos personas distintas de forma simultánea** (Sujeto A y Sujeto B). Las imágenes sufren de marcas de agua complejas y dispersas que ocluyen rasgos faciales, expresiones y fondos texturizados. 
+El dataset objetivo comprende una colección de fotografías donde aparecen **hasta dos personas distintas de forma simultánea** (Sujeto A y Sujeto B). Las imágenes sufren de marcas de agua complejas y dispersas que ocluyen rasgos faciales, expresiones y fondos texturizados.
 
-Sin embargo, el sistema cuenta con dos ventajas clave:
-1. **Miniaturas Limpias de Referencia (`thumb-400`):** Imágenes de baja resolución (400×267 px) no corrompidas que funcionan como un *mapa estructural a priori* (colorimetría, luminancia, geometría global y fondo).
+Sin embargo, disponemos de dos fuentes de apoyo:
+1. **Miniaturas Limpias de Referencia (`thumb-400`):** Imágenes de baja resolución (400×267 px) no sin marcas de agua que funcionan como un *mapa estructural a priori* (colorimetría, luminancia, geometría global y fondo).
 2. **Bancos de Identidad Multi-Referencia (`identity_person_A` y `identity_person_B`):** Galerías de retratos nítidos y sin oclusiones de cada sujeto que permiten computar hipervectores de identidad facial invariantes.
 
 ### Ecosistema Tecnológico (Agosto 2026)
-SurfAI integra los últimos avances en modelos de difusión por Flow Matching y reconocimiento biométrico:
+Pic4Free integra los últimos avances en modelos de difusión por Flow Matching y reconocimiento biométrico:
 * **FLUX 2 / FLUX.2-Fill (12B Diffusion Transformer):** Backbone de inpainting contextual condicionado por gradiente, ruido estructural y texto/identidad.
 * **InsightFace (AntelopeV2 / Buffalo_l ArcFace 512-d):** Extracción de embeddings faciales y enrutamiento espacial multi-sujeto mediante similitud coseno.
 * **Máscaras Diferenciales Multiescala (SSIM + Gradiente):** Segmentación matemática precisa de las regiones afectadas sin tocar regiones vírgenes.
@@ -31,7 +31,7 @@ SurfAI integra los últimos avances en modelos de difusión por Flow Matching y 
 
 ## 2. Arquitectura del Pipeline y Fundamento Matemático
 
-El pipeline de restauración de SurfAI opera en **cuatro etapas secuenciales desacopladas y deterministas**:
+El pipeline de restauración de Pic4Free opera en **cuatro etapas secuenciales desacopladas y deterministas**:
 
 ```mermaid
 flowchart TD
@@ -108,7 +108,7 @@ flowchart TD
 ## 3. Estructura del Repositorio
 
 ```text
-SurfAI/
+Pic4Free/
 ├── .venv/                         # Entorno virtual de Python (creado dinámicamente)
 ├── .cache/                        # Cache local compartida en clúster (HuggingFace, Torch, InsightFace)
 ├── data/
@@ -160,7 +160,7 @@ SurfAI/
 Inicia sesión en el nodo de login del clúster y navega a la raíz del repositorio:
 
 ```bash
-cd /home/tu/tu_tu/tu_zxoxe46/SurfAI
+cd /Pic4Free
 
 # Carga explícita de los módulos oficiales del clúster
 module purge
@@ -217,7 +217,7 @@ sbatch slurm/setup_env.sh
 
 ## 5. Instrucciones de Ejecución con Slurm
 
-SurfAI está diseñado desde el primer principio para el **procesamiento masivo y desacoplado mediante Slurm Job Arrays**. En lugar de iterar secuencialmente sobre las 98 imágenes en un único script monolítico, el dataset se indexa de forma unívoca y cada tarea del array procesa un único par de imágenes en paralelo sobre la flota de GPUs.
+Pic4Free está diseñado desde el primer principio para el **procesamiento masivo y desacoplado mediante Slurm Job Arrays**. En lugar de iterar secuencialmente sobre las 98 imágenes en un único script monolítico, el dataset se indexa de forma unívoca y cada tarea del array procesa un único par de imágenes en paralelo sobre la flota de GPUs.
 
 ### Mapeo de Identificadores de Tarea (`$SLURM_ARRAY_TASK_ID`)
 El dataset en `/data/input/` contiene 98 pares estructurados:
@@ -239,7 +239,7 @@ sbatch slurm/restore_array.sh
 
 #### Parámetros Principales de `slurm/restore_array.sh`:
 ```bash
-#SBATCH --job-name=surfai_array
+#SBATCH --job-name=Pic4Free_array
 #SBATCH --output=slurm_logs/slurm_%A_%a.out
 #SBATCH --error=slurm_logs/slurm_%A_%a.err
 #SBATCH --partition=gpu_h100_short

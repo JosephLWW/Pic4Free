@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=surfai_single
+#SBATCH --job-name=Pic4Free_single
 #SBATCH --output=slurm_logs/slurm_%j.out
 #SBATCH --error=slurm_logs/slurm_%j.err
 #SBATCH --partition=gpu_h100_short
@@ -16,7 +16,7 @@ set -Eeuo pipefail
 TASK_ID="${1:-0}"
 
 echo "=============================================================================="
-echo "Iniciando Job Individual SurfAI: Job ${SLURM_JOB_ID} | Task ID: ${TASK_ID}"
+echo "Iniciando Job Individual Pic4Free: Job ${SLURM_JOB_ID} | Task ID: ${TASK_ID}"
 echo "Fecha y Hora: $(date '+%Y-%m-%d %H:%M:%S')"
 echo "=============================================================================="
 
@@ -61,7 +61,7 @@ REQ_HASH_FILE="${VENV}/.requirements.sha256"
 
 # Crear venv si no existe o si está corrupto
 if [[ ! -x "${PYTHON_BIN}" ]]; then
-    echo "[SurfAI] Entorno virtual no encontrado en ${VENV}. Creando entorno..."
+    echo "[Pic4Free] Entorno virtual no encontrado en ${VENV}. Creando entorno..."
     python3 -m venv "${VENV}"
 fi
 
@@ -78,15 +78,15 @@ echo "Python versión: $("${PYTHON_BIN}" -c 'import sys; print(sys.version.split
 REQ_HASH="$(sha256sum "${WORKDIR}/requirements.txt" | awk '{print $1}')"
 
 if [[ ! -f "${REQ_HASH_FILE}" || "$(cat "${REQ_HASH_FILE}" 2>/dev/null || echo)" != "${REQ_HASH}" ]]; then
-    echo "[SurfAI] Instalando o actualizando dependencias..."
+    echo "[Pic4Free] Instalando o actualizando dependencias..."
     "${PYTHON_BIN}" -m pip install --disable-pip-version-check --upgrade pip setuptools wheel
     "${PYTHON_BIN}" -m pip install --disable-pip-version-check -r "${WORKDIR}/requirements.txt"
     printf '%s\n' "${REQ_HASH}" > "${REQ_HASH_FILE}"
 else
-    echo "[SurfAI] Requisitos ya instalados; reutilizando el entorno virtual."
+    echo "[Pic4Free] Requisitos ya instalados; reutilizando el entorno virtual."
 fi
 
-echo "[SurfAI] Verificando PyTorch/CUDA..."
+echo "[Pic4Free] Verificando PyTorch/CUDA..."
 "${PYTHON_BIN}" - <<'PY'
 import torch
 print(f"PyTorch: {torch.__version__}")

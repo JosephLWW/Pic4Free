@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=surfai_setup_env
+#SBATCH --job-name=Pic4Free_setup_env
 #SBATCH --output=slurm_logs/setup_%j.out
 #SBATCH --error=slurm_logs/setup_%j.err
 #SBATCH --partition=gpu_h100_short

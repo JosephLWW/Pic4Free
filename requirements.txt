@@ -1,5 +1,5 @@
 # ==============================================================================
-# SurfAI - Industrial Multi-Person Watermark Restoration & Facial Inpainting
+# Pic4Free - Industrial Multi-Person Watermark Restoration & Facial Inpainting
 # Tech Stack (HPC Cluster - August 2026 Baseline)
 # ==============================================================================
 

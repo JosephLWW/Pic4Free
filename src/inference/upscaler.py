@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 ==============================================================================
-SurfAI - Stage 4: Post-Processing Super-Resolution & Facial Refinement
+Pic4Free - Stage 4: Post-Processing Super-Resolution & Facial Refinement
 ==============================================================================
 Independent post-processing module that takes the FLUX 2 cleaned intermediate
 image and applies state-of-the-art Super-Resolution (Real-ESRGAN / SwinIR) and
@@ -45,7 +45,7 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
     stream=sys.stdout,
 )
-logger = logging.getLogger("SurfAI.Upscaler")
+logger = logging.getLogger("Pic4Free.Upscaler")
 
 
 # ---------------------------------------------------------------------------
@@ -479,7 +479,7 @@ def run_upscale_pipeline(
 # ---------------------------------------------------------------------------
 def main():
     parser = argparse.ArgumentParser(
-        description="SurfAI Stage 4: Super-Resolution & Facial Refinement Post-Processor",
+        description="Pic4Free Stage 4: Super-Resolution & Facial Refinement Post-Processor",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("--image_id", "--task_id", "-i", type=str, required=True,

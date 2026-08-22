@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=surfai_array
+#SBATCH --job-name=Pic4Free_array
 #SBATCH --output=slurm_logs/slurm_%A_%a.out
 #SBATCH --error=slurm_logs/slurm_%A_%a.err
 #SBATCH --partition=gpu_h100_short
@@ -14,7 +14,7 @@
 set -Eeuo pipefail
 
 echo "=============================================================================="
-echo "Iniciando Tarea Slurm Array SurfAI: Job ${SLURM_ARRAY_JOB_ID:-$SLURM_JOB_ID} | Task ${SLURM_ARRAY_TASK_ID:-0}"
+echo "Iniciando Tarea Slurm Array Pic4Free: Job ${SLURM_ARRAY_JOB_ID:-$SLURM_JOB_ID} | Task ${SLURM_ARRAY_TASK_ID:-0}"
 echo "Fecha y Hora: $(date '+%Y-%m-%d %H:%M:%S')"
 echo "=============================================================================="
 
@@ -59,7 +59,7 @@ REQ_HASH_FILE="${VENV}/.requirements.sha256"
 
 # Crear venv si no existe o si está corrupto
 if [[ ! -x "${PYTHON_BIN}" ]]; then
-    echo "[SurfAI] Entorno virtual no encontrado en ${VENV}. Creando entorno..."
+    echo "[Pic4Free] Entorno virtual no encontrado en ${VENV}. Creando entorno..."
     python3 -m venv "${VENV}"
 fi
 
@@ -76,15 +76,15 @@ echo "Python versión: $("${PYTHON_BIN}" -c 'import sys; print(sys.version.split
 REQ_HASH="$(sha256sum "${WORKDIR}/requirements.txt" | awk '{print $1}')"
 
 if [[ ! -f "${REQ_HASH_FILE}" || "$(cat "${REQ_HASH_FILE}" 2>/dev/null || echo)" != "${REQ_HASH}" ]]; then
-    echo "[SurfAI] Instalando o actualizando dependencias..."
+    echo "[Pic4Free] Instalando o actualizando dependencias..."
     "${PYTHON_BIN}" -m pip install --disable-pip-version-check --upgrade pip setuptools wheel
     "${PYTHON_BIN}" -m pip install --disable-pip-version-check -r "${WORKDIR}/requirements.txt"
     printf '%s\n' "${REQ_HASH}" > "${REQ_HASH_FILE}"
 else
-    echo "[SurfAI] Requisitos ya instalados; reutilizando el entorno virtual."
+    echo "[Pic4Free] Requisitos ya instalados; reutilizando el entorno virtual."
 fi
 
-echo "[SurfAI] Verificando PyTorch/CUDA..."
+echo "[Pic4Free] Verificando PyTorch/CUDA..."
 "${PYTHON_BIN}" - <<'PY'
 import torch
 print(f"PyTorch: {torch.__version__}")
@@ -117,7 +117,7 @@ echo "Dispositivo CUDA:     $("${PYTHON_BIN}" -c 'import torch; print(torch.cuda
 echo "Directorio Salida:    ${OUTPUT_BASE}"
 echo "=============================================================================="
 
-echo "[SurfAI] Despachando tarea ${TASK_ID} para procesamiento individual..."
+echo "[Pic4Free] Despachando tarea ${TASK_ID} para procesamiento individual..."
 
 "${PYTHON_BIN}" src/main.py \
     --task_id "${TASK_ID}" \

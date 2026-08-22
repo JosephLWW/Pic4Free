@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 ==============================================================================
-SurfAI - main.py: Unified Pipeline Orchestrator (Slurm-Compatible Entrypoint)
+Pic4Free - main.py: Unified Pipeline Orchestrator (Slurm-Compatible Entrypoint)
 ==============================================================================
 Single entrypoint invoked by Slurm Array Jobs. Receives a $SLURM_ARRAY_TASK_ID,
 resolves the corresponding image pair, and executes all four stages sequentially:
@@ -47,12 +47,12 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
     stream=sys.stdout,
 )
-logger = logging.getLogger("SurfAI.Main")
+logger = logging.getLogger("Pic4Free.Main")
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="SurfAI: Unified Multi-Stage Watermark Restoration Pipeline",
+        description="Pic4Free: Unified Multi-Stage Watermark Restoration Pipeline",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
@@ -93,7 +93,7 @@ def main():
         (output_dir / subdir).mkdir(parents=True, exist_ok=True)
 
     logger.info("=" * 72)
-    logger.info("SurfAI Pipeline - Unified Orchestrator")
+    logger.info("Pic4Free Pipeline - Unified Orchestrator")
     logger.info("=" * 72)
     logger.info(f"  Task ID:    {args.task_id}")
     logger.info(f"  Job ID:     {args.job_id}")

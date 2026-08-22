@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 ==============================================================================
-SurfAI - Stage 2 & 3: Multi-Person Identity Extraction & FLUX 2 Inpainting
+Pic4Free - Stage 2 & 3: Multi-Person Identity Extraction & FLUX 2 Inpainting
 ==============================================================================
 Industrial multi-person facial identity routing and contextual inpainting engine
 powered by FLUX 2 (FLUX.2-Fill DiT Flow-Matching) and InsightFace ArcFace (512-d).
@@ -48,7 +48,7 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
     stream=sys.stdout,
 )
-logger = logging.getLogger("SurfAI.Flux2Inpaint")
+logger = logging.getLogger("Pic4Free.Flux2Inpaint")
 
 
 @dataclass
@@ -482,7 +482,7 @@ def run_flux2_identity_restoration(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="SurfAI Stage 2 & 3: Multi-Person Identity Matching & FLUX 2 Inpainting",
+        description="Pic4Free Stage 2 & 3: Multi-Person Identity Matching & FLUX 2 Inpainting",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("--image_id", "--task_id", "-i", type=str, required=True,
