@@ -69,7 +69,16 @@ def main():
     parser.add_argument("--output_dir", type=str, default=None,
                         help="Root output dir. Default: data/output/run_<job_id>")
 
-    # FLUX 2 Inpainting parameters
+    # FLUX 2 Inpainting / Generation parameters
+    parser.add_argument("--flux2_model_id", type=str, default="diffusers/FLUX.2-dev-bnb-4bit",
+                        help="FLUX.2-dev model repo id (e.g. diffusers/FLUX.2-dev-bnb-4bit)")
+    parser.add_argument("--hf_token_file", type=str, default=None,
+                        help="Path to local HF token txt file (recommended, not committed)")
+    parser.add_argument("--hf_token_env_var", type=str, default="HF_TOKEN",
+                        help="Env var name for Hugging Face token fallback")
+    parser.add_argument("--remote_text_encoder_url", type=str,
+                        default="https://remote-text-encoder-flux-2.huggingface.co/predict",
+                        help="Remote endpoint for FLUX.2 text encoder embeddings")
     parser.add_argument("--num_inference_steps", type=int, default=28)
     parser.add_argument("--guidance_scale", type=float, default=3.5)
     parser.add_argument("--ssim_threshold", type=float, default=0.65)
@@ -111,10 +120,14 @@ def main():
         t0 = time.time()
 
         inpaint_config = InpaintConfig(
+            model_id=args.flux2_model_id,
             num_inference_steps=args.num_inference_steps,
             guidance_scale=args.guidance_scale,
             seed=args.seed,
             enable_cpu_offload=args.cpu_offload,
+            hf_token_file=args.hf_token_file,
+            hf_token_env_var=args.hf_token_env_var,
+            remote_text_encoder_url=args.remote_text_encoder_url,
         )
 
         restored_intermediate, assigned_faces = run_flux2_identity_restoration(

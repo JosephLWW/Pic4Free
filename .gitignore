@@ -216,3 +216,16 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# -----------------------------
+# Secrets / credentials
+# -----------------------------
+.secrets/
+*.token
+hf_token.txt
+**/hf_token.txt
+huggingface_token.txt
+**/huggingface_token.txt
+.env
+.env.*
+!.env.example

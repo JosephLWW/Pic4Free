@@ -65,7 +65,8 @@ class FaceCropMetadata:
 @dataclass
 class InpaintConfig:
     """Execution parameters for FLUX 2 Inpainting and Identity Routing."""
-    model_id: str = "black-forest-labs/FLUX.1-Fill-dev"  # FLUX 2 / FLUX.2-Fill backbone
+    model_id: str = "diffusers/FLUX.2-dev-bnb-4bit"  # FLUX.2-dev multimodal
+    fallback_fill_model_id: str = "black-forest-labs/FLUX.1-Fill-dev"
     num_inference_steps: int = 28
     guidance_scale: float = 3.5
     match_threshold: float = 0.40
@@ -74,6 +75,9 @@ class InpaintConfig:
     seed: int = 42
     enable_cpu_offload: bool = False
     save_face_crops: bool = True
+    hf_token_file: Optional[str] = None
+    hf_token_env_var: str = "HF_TOKEN"
+    remote_text_encoder_url: str = "https://remote-text-encoder-flux-2.huggingface.co/predict"
 
 
 class FaceGeometryExtractor:
@@ -274,28 +278,76 @@ class Flux2InpaintEngine:
     def __init__(self, config: Optional[InpaintConfig] = None):
         self.config = config or InpaintConfig()
         self.pipeline = None
+        self.pipeline_kind = "none"  # flux2_dev | flux_fill | none
+        self.hf_token: Optional[str] = None
         self._init_pipeline()
 
+    def _resolve_hf_token(self) -> Optional[str]:
+        """Resolve HF token from file first, then environment variables."""
+        if self.config.hf_token_file:
+            token_path = Path(self.config.hf_token_file).expanduser().resolve()
+            if not token_path.exists():
+                raise FileNotFoundError(f"HF token file not found: {token_path}")
+            token = token_path.read_text(encoding="utf-8").strip()
+            if not token:
+                raise ValueError(f"HF token file is empty: {token_path}")
+            logger.info(f"[Flux2Engine] HF token loaded from file: {token_path}")
+            return token
+
+        token = os.getenv(self.config.hf_token_env_var) or os.getenv("HUGGINGFACE_HUB_TOKEN")
+        if token:
+            logger.info("[Flux2Engine] HF token loaded from environment.")
+            return token
+
+        logger.warning("[Flux2Engine] No HF token configured. Gated model download may fail (401).")
+        return None
+
     def _init_pipeline(self):
-        """Loads FLUX 2 Fill pipeline with bfloat16 and memory optimizations."""
+        """Loads FLUX.2-dev pipeline first, then FLUX Fill fallback."""
         if self.config.device != "cuda":
-            logger.warning("[Flux2Engine] CUDA is not active. Inpainting will execute in CPU/Synthetic fallback mode.")
+            logger.warning("[Flux2Engine] CUDA is not active. Using structural fallback.")
             return
 
+        self.hf_token = self._resolve_hf_token()
+
+        # 1) Preferred: FLUX.2-dev multimodal
+        try:
+            from diffusers import Flux2Pipeline
+
+            logger.info(f"[Flux2Engine] Loading FLUX.2-dev Pipeline: {self.config.model_id}")
+            self.pipeline = Flux2Pipeline.from_pretrained(
+                self.config.model_id,
+                text_encoder=None,
+                torch_dtype=self.config.torch_dtype,
+                token=self.hf_token,
+            )
+            if self.config.enable_cpu_offload:
+                self.pipeline.enable_model_cpu_offload()
+            else:
+                self.pipeline.to(self.config.device)
+
+            self.pipeline_kind = "flux2_dev"
+            logger.info("[Flux2Engine] FLUX.2-dev loaded successfully.")
+            return
+        except Exception as exc:
+            logger.warning(f"[Flux2Engine] FLUX.2-dev unavailable: {exc}")
+
+        # 2) Fallback: Fill pipeline
         try:
             from diffusers import FluxFillPipeline, FluxInpaintPipeline
 
-            logger.info(f"[Flux2Engine] Loading FLUX 2 Pipeline: {self.config.model_id} (bfloat16)...")
-
+            logger.info(f"[Flux2Engine] Falling back to fill model: {self.config.fallback_fill_model_id}")
             try:
                 self.pipeline = FluxFillPipeline.from_pretrained(
-                    self.config.model_id,
+                    self.config.fallback_fill_model_id,
                     torch_dtype=self.config.torch_dtype,
+                    token=self.hf_token,
                 )
             except Exception:
                 self.pipeline = FluxInpaintPipeline.from_pretrained(
-                    self.config.model_id,
+                    self.config.fallback_fill_model_id,
                     torch_dtype=self.config.torch_dtype,
+                    token=self.hf_token,
                 )
 
             if self.config.enable_cpu_offload:
@@ -303,11 +355,52 @@ class Flux2InpaintEngine:
             else:
                 self.pipeline.to(self.config.device)
 
-            logger.info("[Flux2Engine] FLUX 2 Pipeline loaded successfully onto GPU.")
-
+            self.pipeline_kind = "flux_fill"
+            logger.info("[Flux2Engine] Fill fallback loaded.")
         except Exception as exc:
-            logger.warning(f"[Flux2Engine] Native FLUX 2 loading deferred or unavailable: {exc}. Activating high-fidelity prior blender.")
+            logger.warning(f"[Flux2Engine] Fill fallback unavailable: {exc}")
             self.pipeline = None
+            self.pipeline_kind = "none"
+
+    def _remote_text_encoder(self, prompt: str) -> torch.Tensor:
+        if not self.hf_token:
+            raise RuntimeError("HF token is required for remote text encoder.")
+
+        response = requests.post(
+            self.config.remote_text_encoder_url,
+            json={"prompt": prompt},
+            headers={
+                "Authorization": f"Bearer {self.hf_token}",
+                "Content-Type": "application/json",
+            },
+            timeout=120,
+        )
+        response.raise_for_status()
+        payload = torch.load(io.BytesIO(response.content), map_location="cpu")
+
+        if isinstance(payload, dict):
+            for key in ("prompt_embeds", "embeds", "embedding"):
+                if key in payload:
+                    payload = payload[key]
+                    break
+
+        if not torch.is_tensor(payload):
+            raise RuntimeError("Remote text encoder response is not a tensor.")
+
+        return payload.to(self.config.device, dtype=self.config.torch_dtype)
+
+    @staticmethod
+    def _masked_composite(generated: Image.Image, watermarked: Image.Image, mask: Image.Image) -> Image.Image:
+        gen_np = np.array(generated.convert("RGB"))
+        wm_np = np.array(watermarked.convert("RGB"))
+        mask_np = np.array(mask.convert("L"))
+
+        if mask_np.shape[:2] != gen_np.shape[:2]:
+            mask_np = cv2.resize(mask_np, (gen_np.shape[1], gen_np.shape[0]), interpolation=cv2.INTER_NEAREST)
+
+        alpha = cv2.GaussianBlur(mask_np.astype(np.float32) / 255.0, (0, 0), 1.2)[..., None]
+        out = alpha * gen_np.astype(np.float32) + (1.0 - alpha) * wm_np.astype(np.float32)
+        return Image.fromarray(np.clip(out, 0, 255).astype(np.uint8))
 
     def execute_inpaint(
         self,
@@ -316,29 +409,46 @@ class Flux2InpaintEngine:
         watermarked_pil: Image.Image,
         prompt: str,
     ) -> Image.Image:
-        """
-        Executes inpainting pass using FLUX 2 or high-fidelity latent Poisson blender.
-
-        Args:
-            base_context_pil: Clean upscaled thumbnail prior (PIL RGB).
-            mask_pil: Binary inpainting mask (PIL L).
-            watermarked_pil: Original watermarked image (PIL RGB).
-            prompt: Identity-conditioned text guidance prompt.
-
-        Returns:
-            Restored PIL Image (RGB).
-        """
         target_w, target_h = watermarked_pil.size
 
-        # HPC VRAM Garbage Collection before execution
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-        if self.pipeline is not None and torch.cuda.is_available():
-            logger.info(f"[Flux2Engine] Starting FLUX 2 Inpainting ({self.config.num_inference_steps} steps, CFG={self.config.guidance_scale})...")
+        if self.pipeline_kind == "flux2_dev" and self.pipeline is not None and torch.cuda.is_available():
+            logger.info("[Flux2Engine] FLUX.2-dev generation + masked composite...")
+            generator = torch.Generator(device=self.config.device).manual_seed(self.config.seed)
+            prompt_embeds = self._remote_text_encoder(prompt)
+
+            # Optional multimodal conditioning with scene priors
+            images_ctx = [
+                watermarked_pil.resize((target_w, target_h), Image.LANCZOS),
+                base_context_pil.resize((target_w, target_h), Image.LANCZOS),
+            ]
+
+            try:
+                result = self.pipeline(
+                    prompt_embeds=prompt_embeds,
+                    image=images_ctx,
+                    num_inference_steps=self.config.num_inference_steps,
+                    guidance_scale=self.config.guidance_scale,
+                    generator=generator,
+                ).images[0]
+            except TypeError:
+                # If installed API revision doesn't accept `image=...`
+                result = self.pipeline(
+                    prompt_embeds=prompt_embeds,
+                    num_inference_steps=self.config.num_inference_steps,
+                    guidance_scale=self.config.guidance_scale,
+                    generator=generator,
+                ).images[0]
+
+            result = result.resize((target_w, target_h), Image.LANCZOS)
+            restored_pil = self._masked_composite(result, watermarked_pil, mask_pil)
+
+        elif self.pipeline_kind == "flux_fill" and self.pipeline is not None and torch.cuda.is_available():
+            logger.info(f"[Flux2Engine] Starting Fill Inpainting ({self.config.num_inference_steps} steps, CFG={self.config.guidance_scale})...")
             generator = torch.Generator(device=self.config.device).manual_seed(self.config.seed)
 
-            # Resize to nearest multiples of 16 for DiT patch alignment
             align_w = (target_w // 16) * 16
             align_h = (target_h // 16) * 16
 
@@ -357,9 +467,8 @@ class Flux2InpaintEngine:
             ).images[0]
 
             restored_pil = result.resize((target_w, target_h), Image.LANCZOS)
-
         else:
-            logger.info("[Flux2Engine] Executing High-Fidelity Multi-Band Structural Prior Reconstruction...")
+            logger.info("[Flux2Engine] Executing structural fallback...")
             ctx_np = np.array(base_context_pil)
             mask_np = np.array(mask_pil)
             wm_np = np.array(watermarked_pil)
