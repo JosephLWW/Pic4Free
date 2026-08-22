@@ -117,11 +117,18 @@ echo "Dispositivo CUDA:     $("${PYTHON_BIN}" -c 'import torch; print(torch.cuda
 echo "Directorio Salida:    ${OUTPUT_BASE}"
 echo "=============================================================================="
 
-echo "[Pic4Free] Despachando tarea ${TASK_ID} para procesamiento individual..."
+
+HF_TOKEN_FILE="${WORKDIR}/hf_token.txt"
+EXTRA_ARGS=()
+
+if [[ -f "${HF_TOKEN_FILE}" ]]; then
+    echo "[Pic4Free] Usando token HF desde: ${HF_TOKEN_FILE}"
+    EXTRA_ARGS+=(--hf_token_file "${HF_TOKEN_FILE}")
+fi
 
 "${PYTHON_BIN}" src/main.py \
     --task_id "${TASK_ID}" \
-    --job_id "${JOB_ID}" \
+    --job_id "${SLURM_JOB_ID}" \
     --input_dir "${WORKDIR}/data/input" \
     --identity_a_dir "${WORKDIR}/data/identity_person_A" \
     --identity_b_dir "${WORKDIR}/data/identity_person_B" \
@@ -130,7 +137,8 @@ echo "[Pic4Free] Despachando tarea ${TASK_ID} para procesamiento individual..."
     --guidance_scale 3.5 \
     --ssim_threshold 0.65 \
     --face_fidelity_weight 0.85 \
-    --enable_face_refinement
+    --enable_face_refinement \
+    "${EXTRA_ARGS[@]}"
 
 EXIT_CODE=$?
 
