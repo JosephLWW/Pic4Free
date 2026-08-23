@@ -70,7 +70,7 @@ def main():
                         help="Root output dir. Default: data/output/run_<job_id>")
 
     # FLUX 2 Inpainting / Generation parameters
-    parser.add_argument("--flux2_model_id", type=str, default="diffusers/FLUX.2-dev",
+    parser.add_argument("--flux2_model_id", type=str, default="black-forest-labs/FLUX.2-dev",
                         help="FLUX.2-dev model repo id (e.g. black-forest-labs/FLUX.2-dev)")
     parser.add_argument("--hf_token_file", type=str, default=None,
                         help="Path to local HF token txt file (recommended, not committed)")
