@@ -101,26 +101,16 @@ if [[ ! -f "${REQ_HASH_FILE}" || "$(cat "${REQ_HASH_FILE}" 2>/dev/null || echo)"
         --disable-pip-version-check \
         --no-cache-dir \
         -r "${WORKDIR}/requirements.txt"
-
-    # Mantener exclusivamente ONNX Runtime GPU.
-    "${PYTHON_BIN}" -m pip uninstall -y onnxruntime >/dev/null 2>&1 || true
-    "${PYTHON_BIN}" -m pip install \
-        --disable-pip-version-check \
-        --no-cache-dir \
-        --upgrade \
-        "onnxruntime-gpu>=1.19.0"
-
-    printf '%s\n' "${REQ_HASH}" > "${REQ_HASH_FILE}"
 else
     echo "[Pic4Free] Requisitos ya instalados; reutilizando el entorno virtual."
 fi
 
-# Asegurar exclusivamente ONNX Runtime GPU en cada ejecución
-"${PYTHON_BIN}" -m pip uninstall -y onnxruntime >/dev/null 2>&1 || true
+# Asegurar exclusivamente ONNX Runtime GPU purgando conflictos previos
+"${PYTHON_BIN}" -m pip uninstall -y onnxruntime onnxruntime-gpu >/dev/null 2>&1 || true
 "${PYTHON_BIN}" -m pip install \
     --disable-pip-version-check \
     --no-cache-dir \
-    --upgrade \
+    --force-reinstall \
     "onnxruntime-gpu>=1.19.0"
 
 # ✅ VERIFY GPU PROVIDER AFTER UNINSTALL

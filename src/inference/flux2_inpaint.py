@@ -67,7 +67,7 @@ class FaceCropMetadata:
 @dataclass
 class InpaintConfig:
     """Execution parameters for FLUX 2 Inpainting and Identity Routing."""
-    model_id: str = "diffusers/FLUX.2-dev-bnb-4bit"  # FLUX.2-dev multimodal
+    model_id: str = "black-forest-labs/FLUX.2-dev"  # FLUX.2-dev multimodal
     fallback_fill_model_id: str = "black-forest-labs/FLUX.1-Fill-dev"
     num_inference_steps: int = 28
     guidance_scale: float = 3.5
@@ -319,11 +319,10 @@ class Flux2InpaintEngine:
         # 1) Preferred: FLUX.2-dev multimodal
         try:
             from diffusers import Flux2Pipeline
-
-            logger.info(f"[Flux2Engine] Loading FLUX.2-dev Pipeline: {self.config.model_id}")
+            logger.info(f"[Flux2Engine] Loading FLUX.2-dev full model: {self.config.model_id}")
+            # Cargar sin text_encoder=None para que use el text encoder local
             self.pipeline = Flux2Pipeline.from_pretrained(
                 self.config.model_id,
-                text_encoder=None,
                 torch_dtype=self.config.torch_dtype,
                 token=self.hf_token,
             )
@@ -331,12 +330,11 @@ class Flux2InpaintEngine:
                 self.pipeline.enable_model_cpu_offload()
             else:
                 self.pipeline.to(self.config.device)
-
-            self.pipeline_kind = "flux2_dev"
-            logger.info("[Flux2Engine] FLUX.2-dev loaded successfully.")
+            self.pipeline_kind = "flux2_dev_full"   # nuevo tipo
+            logger.info("[Flux2Engine] FLUX.2-dev full loaded successfully.")
             return
         except Exception as exc:
-            logger.warning(f"[Flux2Engine] FLUX.2-dev unavailable: {exc}")
+            logger.warning(f"[Flux2Engine] FLUX.2-dev full unavailable: {exc}")
 
         # 2) Fallback: Fill pipeline
         try:
@@ -442,7 +440,24 @@ class Flux2InpaintEngine:
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-        if self.pipeline_kind == "flux2_dev" and self.pipeline is not None and torch.cuda.is_available():
+        if self.pipeline_kind == "flux2_dev_full" and self.pipeline is not None and torch.cuda.is_available():
+            logger.info("[Flux2Engine] FLUX.2-dev full generation with structural prior (local text encoder)...")
+            generator = torch.Generator(device=self.config.device).manual_seed(self.config.seed)
+        
+            # Pasamos la imagen de contexto (thumbnail upscaled) como condicionante multimodal.
+            # Esto guía la generación para respetar el fondo, la iluminación y la composición original.
+            result = self.pipeline(
+                prompt=prompt,
+                image=[base_context_pil],  # <--- NUEVO: prior estructural
+                num_inference_steps=self.config.num_inference_steps,
+                guidance_scale=self.config.guidance_scale,
+                generator=generator,
+            ).images[0]
+        
+            result = result.resize((target_w, target_h), Image.LANCZOS)
+            restored_pil = self._masked_composite(result, watermarked_pil, mask_pil)
+
+        elif self.pipeline_kind == "flux2_dev" and self.pipeline is not None and torch.cuda.is_available():
             logger.info("[Flux2Engine] FLUX.2-dev generation + masked composite...")
             generator = torch.Generator(device=self.config.device).manual_seed(self.config.seed)
             prompt_embeds = self._remote_text_encoder(prompt)

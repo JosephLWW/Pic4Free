@@ -22,7 +22,7 @@ bitsandbytes>=0.45.0
 # =========================================================
 opencv-python-headless>=4.10.0
 Pillow>=10.4.0
-numpy>=1.26.0,<2.0.0
+numpy>=1.26.0,<2.4
 scipy>=1.13.0
 scikit-image>=0.24.0
 albumentations>=1.4.0

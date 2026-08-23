@@ -64,12 +64,18 @@ export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
 export PIC4FREE_IDENTITY_CACHE="${CACHE_ROOT}/identity"
 export XDG_CACHE_HOME="${CACHE_ROOT}/xdg"
 export HOME="${CACHE_ROOT}/home"
+export ORT_DISABLE_CPU_AFFINITY=1
+
 mkdir -p "${PIC4FREE_IDENTITY_CACHE}" "${XDG_CACHE_HOME}" "${HOME}"
 
 VENV="${CACHE_ROOT}/venv"
 PYTHON_BIN="${VENV}/bin/python"
 PIP_BIN="${VENV}/bin/pip"
 REQ_HASH_FILE="${VENV}/.requirements.sha256"
+
+# Forzar la eliminación del venv corrupto
+echo "[Pic4Free] Purgando entorno virtual anterior..."
+rm -rf "${VENV}"
 
 # Crear venv si no existe o si está corrupto
 if [[ ! -x "${PYTHON_BIN}" ]]; then
@@ -100,26 +106,16 @@ if [[ ! -f "${REQ_HASH_FILE}" || "$(cat "${REQ_HASH_FILE}" 2>/dev/null || echo)"
         --disable-pip-version-check \
         --no-cache-dir \
         -r "${WORKDIR}/requirements.txt"
-
-    # Mantener exclusivamente ONNX Runtime GPU.
-    "${PYTHON_BIN}" -m pip uninstall -y onnxruntime >/dev/null 2>&1 || true
-    "${PYTHON_BIN}" -m pip install \
-        --disable-pip-version-check \
-        --no-cache-dir \
-        --upgrade \
-        "onnxruntime-gpu>=1.19.0"
-
-    printf '%s\n' "${REQ_HASH}" > "${REQ_HASH_FILE}"
 else
     echo "[Pic4Free] Requisitos ya instalados; reutilizando el entorno virtual."
 fi
 
-# Asegurar exclusivamente ONNX Runtime GPU en cada ejecución
-"${PYTHON_BIN}" -m pip uninstall -y onnxruntime >/dev/null 2>&1 || true
+# Asegurar exclusivamente ONNX Runtime GPU purgando conflictos previos
+"${PYTHON_BIN}" -m pip uninstall -y onnxruntime onnxruntime-gpu >/dev/null 2>&1 || true
 "${PYTHON_BIN}" -m pip install \
     --disable-pip-version-check \
     --no-cache-dir \
-    --upgrade \
+    --force-reinstall \
     "onnxruntime-gpu>=1.19.0"
 
 # ✅ VERIFY GPU PROVIDER AFTER UNINSTALL
