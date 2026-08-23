@@ -307,22 +307,42 @@ class Flux2InpaintEngine:
 
         logger.warning("[Flux2Engine] No HF token configured. Gated model download may fail (401).")
         return None
-
+    
     def _init_pipeline(self):
-        """Loads FLUX.2-dev pipeline first, then FLUX Fill fallback."""
+        """Loads FLUX.2-dev with remote encoder, FP8 fallback, then FLUX.2-klein-9B."""
         if self.config.device != "cuda":
             logger.warning("[Flux2Engine] CUDA is not active. Using structural fallback.")
             return
-
+    
         self.hf_token = self._resolve_hf_token()
-
-        # 1) Preferred: FLUX.2-dev multimodal
+    
+        # 1) FLUX.2-dev con codificador remoto (lightweight)
         try:
             from diffusers import Flux2Pipeline
-            logger.info(f"[Flux2Engine] Loading FLUX.2-dev full model: {self.config.model_id}")
-            # Cargar sin text_encoder=None para que use el text encoder local
+            logger.info(f"[Flux2Engine] Loading FLUX.2-dev with remote text encoder...")
             self.pipeline = Flux2Pipeline.from_pretrained(
                 self.config.model_id,
+                torch_dtype=self.config.torch_dtype,
+                token=self.hf_token,
+                text_encoder=None,
+                text_encoder_2=None,
+            )
+            if self.config.enable_cpu_offload:
+                self.pipeline.enable_model_cpu_offload()
+            else:
+                self.pipeline.to(self.config.device)
+            self.pipeline_kind = "flux2_dev"
+            logger.info("[Flux2Engine] FLUX.2-dev (remote encoder) loaded successfully.")
+            return
+        except Exception as exc:
+            logger.warning(f"[Flux2Engine] Remote encoder failed: {exc}")
+    
+        # 2) FLUX.2-dev FP8 (quantized, no remote encoder)
+        try:
+            from diffusers import DiffusionPipeline
+            logger.info("[Flux2Engine] Loading FLUX.2-dev FP8 quantized...")
+            self.pipeline = DiffusionPipeline.from_pretrained(
+                "unsloth/FLUX.2-dev-FP8",   # or "yeonjoon-jung/FLUX.2-dev_FP8"
                 torch_dtype=self.config.torch_dtype,
                 token=self.hf_token,
             )
@@ -330,41 +350,35 @@ class Flux2InpaintEngine:
                 self.pipeline.enable_model_cpu_offload()
             else:
                 self.pipeline.to(self.config.device)
-            self.pipeline_kind = "flux2_dev_full"   # nuevo tipo
-            logger.info("[Flux2Engine] FLUX.2-dev full loaded successfully.")
+            self.pipeline_kind = "flux2_dev_full"
+            logger.info("[Flux2Engine] FLUX.2-dev FP8 loaded successfully.")
             return
         except Exception as exc:
-            logger.warning(f"[Flux2Engine] FLUX.2-dev full unavailable: {exc}")
-
-        # 2) Fallback: Fill pipeline
+            logger.warning(f"[Flux2Engine] FP8 model unavailable: {exc}")
+    
+        # 3) FLUX.2-klein-9B as final fallback
         try:
-            from diffusers import FluxFillPipeline, FluxInpaintPipeline
-
-            logger.info(f"[Flux2Engine] Falling back to fill model: {self.config.fallback_fill_model_id}")
-            try:
-                self.pipeline = FluxFillPipeline.from_pretrained(
-                    self.config.fallback_fill_model_id,
-                    torch_dtype=self.config.torch_dtype,
-                    token=self.hf_token,
-                )
-            except Exception:
-                self.pipeline = FluxInpaintPipeline.from_pretrained(
-                    self.config.fallback_fill_model_id,
-                    torch_dtype=self.config.torch_dtype,
-                    token=self.hf_token,
-                )
-
+            from diffusers import DiffusionPipeline
+            logger.info("[Flux2Engine] Loading FLUX.2-klein-9B as final fallback...")
+            self.pipeline = DiffusionPipeline.from_pretrained(
+                "black-forest-labs/FLUX.2-klein-9B",
+                torch_dtype=self.config.torch_dtype,
+                token=self.hf_token,
+            )
             if self.config.enable_cpu_offload:
                 self.pipeline.enable_model_cpu_offload()
             else:
                 self.pipeline.to(self.config.device)
-
-            self.pipeline_kind = "flux_fill"
-            logger.info("[Flux2Engine] Fill fallback loaded.")
+            self.pipeline_kind = "flux2_dev_full"
+            logger.info("[Flux2Engine] FLUX.2-klein-9B loaded successfully.")
+            return
         except Exception as exc:
-            logger.warning(f"[Flux2Engine] Fill fallback unavailable: {exc}")
-            self.pipeline = None
-            self.pipeline_kind = "none"
+            logger.warning(f"[Flux2Engine] FLUX.2-klein-9B unavailable: {exc}")
+    
+        # If everything fails
+        self.pipeline = None
+        self.pipeline_kind = "none"
+        logger.error("[Flux2Engine] No pipeline could be loaded.")
 
     def _remote_text_encoder(self, prompt: str) -> torch.Tensor:
         if not self.hf_token:

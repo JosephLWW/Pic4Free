@@ -64,6 +64,10 @@ export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
 export PIC4FREE_IDENTITY_CACHE="${CACHE_ROOT}/identity"
 export XDG_CACHE_HOME="${CACHE_ROOT}/xdg"
 export HOME="${CACHE_ROOT}/home"
+export OMP_NUM_THREADS=1
+export OMP_DYNAMIC=FALSE
+export OMP_PROC_BIND=false
+export OMP_PLACES=threads
 export ORT_DISABLE_CPU_AFFINITY=1
 
 mkdir -p "${PIC4FREE_IDENTITY_CACHE}" "${XDG_CACHE_HOME}" "${HOME}"
@@ -72,10 +76,6 @@ VENV="${CACHE_ROOT}/venv"
 PYTHON_BIN="${VENV}/bin/python"
 PIP_BIN="${VENV}/bin/pip"
 REQ_HASH_FILE="${VENV}/.requirements.sha256"
-
-# Forzar la eliminación del venv corrupto
-echo "[Pic4Free] Purgando entorno virtual anterior..."
-rm -rf "${VENV}"
 
 # Crear venv si no existe o si está corrupto
 if [[ ! -x "${PYTHON_BIN}" ]]; then
