@@ -38,6 +38,24 @@ import numpy as np
 from PIL import Image
 import torch
 
+
+def _install_torchvision_compatibility_shim() -> None:
+    """Compatibilidad para librerías antiguas que importan functional_tensor."""
+    import sys
+    import types
+    import torchvision.transforms.functional as functional
+
+    module_name = "torchvision.transforms.functional_tensor"
+
+    if module_name not in sys.modules:
+        compatibility_module = types.ModuleType(module_name)
+        for name in dir(functional):
+            setattr(compatibility_module, name, getattr(functional, name))
+        sys.modules[module_name] = compatibility_module
+
+
+_install_torchvision_compatibility_shim()
+
 # Configure industrial logging
 logging.basicConfig(
     level=logging.INFO,

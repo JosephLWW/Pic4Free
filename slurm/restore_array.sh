@@ -40,19 +40,34 @@ done
 
 cd "${WORKDIR}"
 
-# Directorios de trabajo dentro del repositorio
-mkdir -p "${WORKDIR}/slurm_logs" \
-         "${WORKDIR}/.cache/huggingface" \
-         "${WORKDIR}/.cache/torch" \
-         "${WORKDIR}/.cache/insightface"
+# Usar almacenamiento temporal o Scratch, no la cuota del proyecto
+if [[ -z "${PIC4FREE_CACHE_ROOT:-}" && -z "${SCRATCH:-}" && -z "${TMPDIR:-}" ]]; then
+    echo "ERROR: No existe SCRATCH/TMPDIR para almacenar cachés." >&2
+    exit 1
+fi
 
-export HF_HOME="${WORKDIR}/.cache/huggingface"
-export TORCH_HOME="${WORKDIR}/.cache/torch"
-export INSIGHTFACE_HOME="${WORKDIR}/.cache/insightface"
+CACHE_ROOT="${PIC4FREE_CACHE_ROOT:-${SCRATCH:-${TMPDIR}}}"
+CACHE_ROOT="${CACHE_ROOT}/pic4free/${USER}"
+
+mkdir -p \
+    "${CACHE_ROOT}/huggingface" \
+    "${CACHE_ROOT}/torch" \
+    "${CACHE_ROOT}/insightface"
+
+export HF_HOME="${CACHE_ROOT}/huggingface"
+export HUGGINGFACE_HUB_CACHE="${HF_HOME}/hub"
+export TRANSFORMERS_CACHE="${HF_HOME}/transformers"
+export TORCH_HOME="${CACHE_ROOT}/torch"
+export INSIGHTFACE_HOME="${CACHE_ROOT}/insightface"
+export PIP_NO_CACHE_DIR=1
 export PYTHONUNBUFFERED=1
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
+export PIC4FREE_IDENTITY_CACHE="${CACHE_ROOT}/identity"
+export XDG_CACHE_HOME="${CACHE_ROOT}/xdg"
+export HOME="${CACHE_ROOT}/home"
+mkdir -p "${PIC4FREE_IDENTITY_CACHE}" "${XDG_CACHE_HOME}" "${HOME}"
 
-VENV="${WORKDIR}/.venv"
+VENV="${CACHE_ROOT}/venv"
 PYTHON_BIN="${VENV}/bin/python"
 PIP_BIN="${VENV}/bin/pip"
 REQ_HASH_FILE="${VENV}/.requirements.sha256"
@@ -77,12 +92,38 @@ REQ_HASH="$(sha256sum "${WORKDIR}/requirements.txt" | awk '{print $1}')"
 
 if [[ ! -f "${REQ_HASH_FILE}" || "$(cat "${REQ_HASH_FILE}" 2>/dev/null || echo)" != "${REQ_HASH}" ]]; then
     echo "[Pic4Free] Instalando o actualizando dependencias..."
-    "${PYTHON_BIN}" -m pip install --disable-pip-version-check --upgrade pip setuptools wheel
-    "${PYTHON_BIN}" -m pip install --disable-pip-version-check -r "${WORKDIR}/requirements.txt"
+    "${PYTHON_BIN}" -m pip install \
+    --disable-pip-version-check \
+    --no-cache-dir \
+    --upgrade pip setuptools wheel
+
+    "${PYTHON_BIN}" -m pip install \
+        --disable-pip-version-check \
+        --no-cache-dir \
+        -r "${WORKDIR}/requirements.txt"
+
+    # Mantener exclusivamente ONNX Runtime GPU.
+    "${PYTHON_BIN}" -m pip uninstall -y onnxruntime >/dev/null 2>&1 || true
+    "${PYTHON_BIN}" -m pip install \
+        --disable-pip-version-check \
+        --no-cache-dir \
+        --upgrade \
+        "onnxruntime-gpu>=1.19.0"
+
     printf '%s\n' "${REQ_HASH}" > "${REQ_HASH_FILE}"
 else
     echo "[Pic4Free] Requisitos ya instalados; reutilizando el entorno virtual."
 fi
+
+"${PYTHON_BIN}" - <<'PY'
+import onnxruntime as ort
+
+providers = ort.get_available_providers()
+print("ONNX Runtime providers:", providers)
+
+if "CUDAExecutionProvider" not in providers:
+    raise RuntimeError("ONNX Runtime GPU no está disponible")
+PY
 
 echo "[Pic4Free] Verificando PyTorch/CUDA..."
 "${PYTHON_BIN}" - <<'PY'

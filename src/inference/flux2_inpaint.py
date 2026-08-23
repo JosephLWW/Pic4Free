@@ -156,7 +156,11 @@ class IdentityManager:
 
     def __init__(self, device: str = "cuda", cache_dir: Optional[Union[str, Path]] = None):
         self.device = device
-        self.cache_dir = Path(cache_dir or (REPO_ROOT / ".cache" / "identity"))
+        default_cache = os.getenv(
+            "PIC4FREE_IDENTITY_CACHE",
+            str(REPO_ROOT / ".cache" / "identity"),
+        )
+        self.cache_dir = Path(cache_dir or default_cache)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.embedder = None
         self.mean_embedding_a: Optional[np.ndarray] = None
