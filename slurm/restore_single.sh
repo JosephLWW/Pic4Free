@@ -114,6 +114,15 @@ else
     echo "[Pic4Free] Requisitos ya instalados; reutilizando el entorno virtual."
 fi
 
+# Asegurar exclusivamente ONNX Runtime GPU en cada ejecución
+"${PYTHON_BIN}" -m pip uninstall -y onnxruntime >/dev/null 2>&1 || true
+"${PYTHON_BIN}" -m pip install \
+    --disable-pip-version-check \
+    --no-cache-dir \
+    --upgrade \
+    "onnxruntime-gpu>=1.19.0"
+
+# ✅ VERIFY GPU PROVIDER AFTER UNINSTALL
 "${PYTHON_BIN}" - <<'PY'
 import onnxruntime as ort
 
@@ -134,16 +143,6 @@ if torch.cuda.is_available():
     print(f"Capacidad: {torch.cuda.get_device_capability(0)}")
     print(f"CUDA runtime: {torch.version.cuda}")
 PY
-
-echo "[Pic4Free] Verificando ONNX Runtime providers..."
-"${PYTHON_BIN}" - <<'PY'
-import onnxruntime as ort
-print("onnxruntime version:", ort.__version__)
-print("available providers:", ort.get_available_providers())
-PY
-
-echo "[Pic4Free] Pip packages ONNX:"
-"${PYTHON_BIN}" -m pip show onnxruntime onnxruntime-gpu || true
 
 JOB_ID="${SLURM_JOB_ID}"
 TASK_ID="${1:-${SLURM_ARRAY_TASK_ID:-0}}"

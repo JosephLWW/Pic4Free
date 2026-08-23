@@ -93,9 +93,9 @@ REQ_HASH="$(sha256sum "${WORKDIR}/requirements.txt" | awk '{print $1}')"
 if [[ ! -f "${REQ_HASH_FILE}" || "$(cat "${REQ_HASH_FILE}" 2>/dev/null || echo)" != "${REQ_HASH}" ]]; then
     echo "[Pic4Free] Instalando o actualizando dependencias..."
     "${PYTHON_BIN}" -m pip install \
-    --disable-pip-version-check \
-    --no-cache-dir \
-    --upgrade pip setuptools wheel
+        --disable-pip-version-check \
+        --no-cache-dir \
+        --upgrade pip setuptools wheel
 
     "${PYTHON_BIN}" -m pip install \
         --disable-pip-version-check \
@@ -115,6 +115,15 @@ else
     echo "[Pic4Free] Requisitos ya instalados; reutilizando el entorno virtual."
 fi
 
+# Asegurar exclusivamente ONNX Runtime GPU en cada ejecución
+"${PYTHON_BIN}" -m pip uninstall -y onnxruntime >/dev/null 2>&1 || true
+"${PYTHON_BIN}" -m pip install \
+    --disable-pip-version-check \
+    --no-cache-dir \
+    --upgrade \
+    "onnxruntime-gpu>=1.19.0"
+
+# ✅ VERIFY GPU PROVIDER AFTER UNINSTALL
 "${PYTHON_BIN}" - <<'PY'
 import onnxruntime as ort
 
