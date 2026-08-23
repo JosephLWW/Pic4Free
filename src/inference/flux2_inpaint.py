@@ -775,10 +775,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()ion as exc:
-        logger.error(f"[FLUX 2 Inpaint] Fatal execution error for task {args.image_id}: {exc}", exc_info=True)
-        sys.exit(1)
-
-
-if __name__ == "__main__":
     main()
