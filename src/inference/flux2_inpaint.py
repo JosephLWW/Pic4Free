@@ -307,21 +307,24 @@ class Flux2InpaintEngine:
 
         logger.warning("[Flux2Engine] No HF token configured. Gated model download may fail (401).")
         return None
-    
+
     def _init_pipeline(self):
-        """Loads FLUX.2-dev FP8, then FLUX.2-klein-9B as fallback."""
+        """Loads FLUX.2-dev (clean mirror), FP8, 4-bit, or FLUX.2-klein-9B."""
         if self.config.device != "cuda":
             logger.warning("[Flux2Engine] CUDA is not active. Using structural fallback.")
             return
-    
+
         self.hf_token = self._resolve_hf_token()
-    
-        # 1) Intentar FLUX.2-dev FP8 (cuantizado, sin codificador remoto)
+
+        # Use the clean mirror to avoid double-loading bug
+        CLEAN_MODEL_ID = "Aquiles-ai/FLUX.2-dev"
+
+        # ---------- 1) Full model (clean mirror) ----------
         try:
-            from diffusers import DiffusionPipeline
-            logger.info("[Flux2Engine] Loading FLUX.2-dev FP8 quantized...")
-            self.pipeline = DiffusionPipeline.from_pretrained(
-                "unsloth/FLUX.2-dev-FP8",
+            from diffusers import Flux2Pipeline
+            logger.info(f"[Flux2Engine] Loading FLUX.2-dev full model from {CLEAN_MODEL_ID}...")
+            self.pipeline = Flux2Pipeline.from_pretrained(
+                CLEAN_MODEL_ID,
                 torch_dtype=self.config.torch_dtype,
                 token=self.hf_token,
             )
@@ -329,13 +332,94 @@ class Flux2InpaintEngine:
                 self.pipeline.enable_model_cpu_offload()
             else:
                 self.pipeline.to(self.config.device)
+
+            # Memory optimizations for high resolution
+            try:
+                self.pipeline.enable_xformers_memory_efficient_attention()
+            except Exception:
+                pass
+            try:
+                self.pipeline.enable_attention_slicing()
+            except Exception:
+                pass
+            try:
+                self.pipeline.transformer.enable_gradient_checkpointing()
+            except Exception:
+                pass
+
+            self.pipeline_kind = "flux2_dev_full"
+            logger.info("[Flux2Engine] FLUX.2-dev full loaded successfully.")
+            return
+        except Exception as exc:
+            logger.warning(f"[Flux2Engine] FLUX.2-dev full unavailable: {exc}")
+
+        # ---------- 2) FP8 (yeonjoon-jung) ----------
+        try:
+            from diffusers import DiffusionPipeline
+            logger.info("[Flux2Engine] Loading FLUX.2-dev FP8 quantized...")
+            self.pipeline = DiffusionPipeline.from_pretrained(
+                "yeonjoon-jung/FLUX.2-dev_FP8",
+                torch_dtype=self.config.torch_dtype,
+                token=self.hf_token,
+            )
+            if self.config.enable_cpu_offload:
+                self.pipeline.enable_model_cpu_offload()
+            else:
+                self.pipeline.to(self.config.device)
+
+            try:
+                self.pipeline.enable_xformers_memory_efficient_attention()
+            except Exception:
+                pass
+            try:
+                self.pipeline.enable_attention_slicing()
+            except Exception:
+                pass
+            try:
+                self.pipeline.transformer.enable_gradient_checkpointing()
+            except Exception:
+                pass
+
             self.pipeline_kind = "flux2_dev_full"
             logger.info("[Flux2Engine] FLUX.2-dev FP8 loaded successfully.")
             return
         except Exception as exc:
             logger.warning(f"[Flux2Engine] FP8 model unavailable: {exc}")
-    
-        # 2) FLUX.2-klein-9B como fallback
+
+        # ---------- 3) 4‑bit (official diffusers) ----------
+        try:
+            from diffusers import Flux2Pipeline
+            logger.info("[Flux2Engine] Loading FLUX.2-dev 4-bit (bnb)...")
+            self.pipeline = Flux2Pipeline.from_pretrained(
+                "diffusers/FLUX.2-dev-bnb-4bit",
+                torch_dtype=self.config.torch_dtype,
+                token=self.hf_token,
+            )
+            if self.config.enable_cpu_offload:
+                self.pipeline.enable_model_cpu_offload()
+            else:
+                self.pipeline.to(self.config.device)
+
+            try:
+                self.pipeline.enable_xformers_memory_efficient_attention()
+            except Exception:
+                pass
+            try:
+                self.pipeline.enable_attention_slicing()
+            except Exception:
+                pass
+            try:
+                self.pipeline.transformer.enable_gradient_checkpointing()
+            except Exception:
+                pass
+
+            self.pipeline_kind = "flux2_dev_full"
+            logger.info("[Flux2Engine] FLUX.2-dev 4-bit loaded successfully.")
+            return
+        except Exception as exc:
+            logger.warning(f"[Flux2Engine] 4-bit model unavailable: {exc}")
+
+        # ---------- 4) FLUX.2-klein-9B ----------
         try:
             from diffusers import DiffusionPipeline
             logger.info("[Flux2Engine] Loading FLUX.2-klein-9B...")
@@ -348,13 +432,27 @@ class Flux2InpaintEngine:
                 self.pipeline.enable_model_cpu_offload()
             else:
                 self.pipeline.to(self.config.device)
+
+            try:
+                self.pipeline.enable_xformers_memory_efficient_attention()
+            except Exception:
+                pass
+            try:
+                self.pipeline.enable_attention_slicing()
+            except Exception:
+                pass
+            try:
+                self.pipeline.transformer.enable_gradient_checkpointing()
+            except Exception:
+                pass
+
             self.pipeline_kind = "flux2_dev_full"
             logger.info("[Flux2Engine] FLUX.2-klein-9B loaded successfully.")
             return
         except Exception as exc:
             logger.warning(f"[Flux2Engine] FLUX.2-klein-9B unavailable: {exc}")
-    
-        # Si todo falla, se usa el fallback estructural (composición simple)
+
+        # If everything fails
         self.pipeline = None
         self.pipeline_kind = "none"
         logger.error("[Flux2Engine] No pipeline could be loaded.")
@@ -672,6 +770,12 @@ def main():
         logger.info(f"[FLUX 2 Inpaint] Task {args.image_id} completed successfully in {elapsed:.2f}s.")
         sys.exit(0)
     except Exception as exc:
+        logger.error(f"[FLUX 2 Inpaint] Fatal execution error for task {args.image_id}: {exc}", exc_info=True)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()ion as exc:
         logger.error(f"[FLUX 2 Inpaint] Fatal execution error for task {args.image_id}: {exc}", exc_info=True)
         sys.exit(1)
 
