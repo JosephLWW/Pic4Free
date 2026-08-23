@@ -374,11 +374,33 @@ class Flux2InpaintEngine:
             headers={
                 "Authorization": f"Bearer {self.hf_token}",
                 "Content-Type": "application/json",
+                "Accept": "application/octet-stream, application/json",
             },
             timeout=120,
         )
-        response.raise_for_status()
-        payload = torch.load(io.BytesIO(response.content), map_location="cpu")
+
+        content_type = response.headers.get("content-type", "").lower()
+
+        if not response.ok:
+            raise RuntimeError(
+                f"Remote text encoder failed: HTTP {response.status_code}, "
+                f"content_type={content_type}, body={response.text[:500]!r}"
+            )
+
+        if "text/html" in content_type or "xml" in content_type:
+            raise RuntimeError(
+                "Remote text encoder returned HTML/XML instead of tensor data: "
+                f"{response.text[:500]!r}"
+            )
+
+        if "application/json" in content_type:
+            payload = response.json()
+        else:
+            payload = torch.load(
+                io.BytesIO(response.content),
+                map_location="cpu",
+                weights_only=False,
+            )
 
         if isinstance(payload, dict):
             for key in ("prompt_embeds", "embeds", "embedding"):
@@ -387,7 +409,7 @@ class Flux2InpaintEngine:
                     break
 
         if not torch.is_tensor(payload):
-            raise RuntimeError("Remote text encoder response is not a tensor.")
+            payload = torch.as_tensor(payload)
 
         return payload.to(self.config.device, dtype=self.config.torch_dtype)
 

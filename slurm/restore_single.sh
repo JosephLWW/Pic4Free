@@ -94,6 +94,16 @@ if torch.cuda.is_available():
     print(f"CUDA runtime: {torch.version.cuda}")
 PY
 
+echo "[Pic4Free] Verificando ONNX Runtime providers..."
+"${PYTHON_BIN}" - <<'PY'
+import onnxruntime as ort
+print("onnxruntime version:", ort.__version__)
+print("available providers:", ort.get_available_providers())
+PY
+
+echo "[Pic4Free] Pip packages ONNX:"
+"${PYTHON_BIN}" -m pip show onnxruntime onnxruntime-gpu || true
+
 JOB_ID="${SLURM_JOB_ID}"
 TASK_ID="${1:-${SLURM_ARRAY_TASK_ID:-0}}"
 OUTPUT_BASE="${WORKDIR}/data/output/run_${JOB_ID}"
