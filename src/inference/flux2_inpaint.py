@@ -309,40 +309,19 @@ class Flux2InpaintEngine:
         return None
     
     def _init_pipeline(self):
-        """Loads FLUX.2-dev with remote encoder, FP8 fallback, then FLUX.2-klein-9B."""
+        """Loads FLUX.2-dev FP8, then FLUX.2-klein-9B as fallback."""
         if self.config.device != "cuda":
             logger.warning("[Flux2Engine] CUDA is not active. Using structural fallback.")
             return
     
         self.hf_token = self._resolve_hf_token()
     
-        # 1) FLUX.2-dev con codificador remoto (lightweight)
-        try:
-            from diffusers import Flux2Pipeline
-            logger.info(f"[Flux2Engine] Loading FLUX.2-dev with remote text encoder...")
-            self.pipeline = Flux2Pipeline.from_pretrained(
-                self.config.model_id,
-                torch_dtype=self.config.torch_dtype,
-                token=self.hf_token,
-                text_encoder=None,
-                text_encoder_2=None,
-            )
-            if self.config.enable_cpu_offload:
-                self.pipeline.enable_model_cpu_offload()
-            else:
-                self.pipeline.to(self.config.device)
-            self.pipeline_kind = "flux2_dev"
-            logger.info("[Flux2Engine] FLUX.2-dev (remote encoder) loaded successfully.")
-            return
-        except Exception as exc:
-            logger.warning(f"[Flux2Engine] Remote encoder failed: {exc}")
-    
-        # 2) FLUX.2-dev FP8 (quantized, no remote encoder)
+        # 1) Intentar FLUX.2-dev FP8 (cuantizado, sin codificador remoto)
         try:
             from diffusers import DiffusionPipeline
             logger.info("[Flux2Engine] Loading FLUX.2-dev FP8 quantized...")
             self.pipeline = DiffusionPipeline.from_pretrained(
-                "unsloth/FLUX.2-dev-FP8",   # or "yeonjoon-jung/FLUX.2-dev_FP8"
+                "unsloth/FLUX.2-dev-FP8",
                 torch_dtype=self.config.torch_dtype,
                 token=self.hf_token,
             )
@@ -356,10 +335,10 @@ class Flux2InpaintEngine:
         except Exception as exc:
             logger.warning(f"[Flux2Engine] FP8 model unavailable: {exc}")
     
-        # 3) FLUX.2-klein-9B as final fallback
+        # 2) FLUX.2-klein-9B como fallback
         try:
             from diffusers import DiffusionPipeline
-            logger.info("[Flux2Engine] Loading FLUX.2-klein-9B as final fallback...")
+            logger.info("[Flux2Engine] Loading FLUX.2-klein-9B...")
             self.pipeline = DiffusionPipeline.from_pretrained(
                 "black-forest-labs/FLUX.2-klein-9B",
                 torch_dtype=self.config.torch_dtype,
@@ -375,7 +354,7 @@ class Flux2InpaintEngine:
         except Exception as exc:
             logger.warning(f"[Flux2Engine] FLUX.2-klein-9B unavailable: {exc}")
     
-        # If everything fails
+        # Si todo falla, se usa el fallback estructural (composición simple)
         self.pipeline = None
         self.pipeline_kind = "none"
         logger.error("[Flux2Engine] No pipeline could be loaded.")
