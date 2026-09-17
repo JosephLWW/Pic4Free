@@ -9,8 +9,8 @@
 
 | Input (watermarked) | Restored (HD, identity-checked) |
 |---|---|
-| ![before](docs/1_before.jpg) | ![after](docs/1_after.jpg) |
-| ![before](docs/2_before.jpg) | ![after](docs/2_after.jpg) |
+| ![before](docs/1_before.jpg) | ![after](docs/1_after.png) |
+| ![before](docs/2_before.jpg) | ![after](docs/2_after.png) |
 
 *Drop your own before/after pairs at the paths above (`docs/`). The table renders automatically once the four JPGs exist.*
 
