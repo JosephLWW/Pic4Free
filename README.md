@@ -1,351 +1,188 @@
-# Pic4Free: Multi-Person Watermark Restoration & Facial Identity Inpainting Pipeline
-### *High-Performance Computing (HPC) Industrial Architecture — State of the Art (August 2026)*
+# Pic4Free: Watermark Removal with Identity-Preserving Face Restoration
 
-[![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-blue.svg)](https://www.python.org/)
-[![PyTorch 2.5+](https://img.shields.io/badge/PyTorch-2.5%2B%20%7C%20CUDA%2012.8-ee4c2c.svg)](https://pytorch.org/)
-[![FLUX.2-Fill](https://img.shields.io/badge/Diffusers-FLUX.2--Fill%20(12B%20DiT)-purple.svg)](https://huggingface.co/)
-[![InsightFace](https://img.shields.io/badge/InsightFace-AntelopeV2%20%2F%20ArcFace-green.svg)](https://github.com/deepinsight/insightface)
-[![Slurm HPC Ready](https://img.shields.io/badge/HPC-Slurm%20Array%20Jobs-orange.svg)](https://slurm.schedmd.com/)
+> HPC pipeline that removes dense semi-transparent watermarks from photographs and restores HD faces with per-person LoRA refinement — every identity claim backed by a measured ArcFace cosine, not by vibes.
 
----
+[![Python 3.12](https://img.shields.io/badge/Python-3.12-blue.svg)](https://www.python.org/)
+[![PyTorch 2.4+](https://img.shields.io/badge/PyTorch-2.4%2B-ee4c2c.svg)](https://pytorch.org/)
+[![H100](https://img.shields.io/badge/GPU-H100_80GB-76b900.svg)](https://www.nvidia.com/)
+[![License: Non-commercial](https://img.shields.io/badge/License-FLUX.1_non--commercial-lightgrey.svg)](https://huggingface.co/black-forest-labs/FLUX.1-dev/blob/main/LICENSE.md)
 
-## 1. Visión General y Propósito del Repositorio
+| Input (watermarked) | Restored (HD, identity-checked) |
+|---|---|
+| ![before](docs/1_before.jpg) | ![after](docs/1_after.jpg) |
+| ![before](docs/2_before.jpg) | ![after](docs/2_after.jpg) |
 
-**Pic4Free** es una infraestructura computacional de nivel industrial y de alto rendimiento (HPC) diseñada para la **restauración automatizada y de ultra-alta fidelidad de fotografías de alta resolución degradadas por marcas de agua densas, semitransparentes u opacas**, con un enfoque primordial en la **preservación y reconstrucción de la identidad facial multi-persona**.
-
-### El Problema Crítico
-El dataset objetivo comprende una colección de fotografías donde aparecen **hasta dos personas distintas de forma simultánea** (Sujeto A y Sujeto B). Las imágenes sufren de marcas de agua complejas y dispersas que ocluyen rasgos faciales, expresiones y fondos texturizados.
-
-Sin embargo, disponemos de dos fuentes de apoyo:
-1. **Miniaturas Limpias de Referencia (`thumb-400`):** Imágenes de baja resolución (400×267 px) no sin marcas de agua que funcionan como un *mapa estructural a priori* (colorimetría, luminancia, geometría global y fondo).
-2. **Bancos de Identidad Multi-Referencia (`identity_person_A` y `identity_person_B`):** Galerías de retratos nítidos y sin oclusiones de cada sujeto que permiten computar hipervectores de identidad facial invariantes.
-
-### Ecosistema Tecnológico (Agosto 2026)
-Pic4Free integra los últimos avances en modelos de difusión por Flow Matching y reconocimiento biométrico:
-* **FLUX 2 / FLUX.2-Fill (12B Diffusion Transformer):** Backbone de inpainting contextual condicionado por gradiente, ruido estructural y texto/identidad.
-* **InsightFace (AntelopeV2 / Buffalo_l ArcFace 512-d):** Extracción de embeddings faciales y enrutamiento espacial multi-sujeto mediante similitud coseno.
-* **Máscaras Diferenciales Multiescala (SSIM + Gradiente):** Segmentación matemática precisa de las regiones afectadas sin tocar regiones vírgenes.
-* **Orquestación Paralela Masiva con Slurm:** Despacho distribuido mediante **Slurm Array Jobs** con escalabilidad lineal en clústeres GPU (NVIDIA H100 / A100).
+*Drop your own before/after pairs at the paths above (`docs/`). The table renders automatically once the four JPGs exist.*
 
 ---
 
-## 2. Arquitectura del Pipeline y Fundamento Matemático
+## 1. What it does
 
-El pipeline de restauración de Pic4Free opera en **cuatro etapas secuenciales desacopladas y deterministas**:
+Given a photo covered by a repeating semi-transparent watermark (text + logos over the whole frame), Pic4Free produces a clean **HD image (1920 px long edge)** that:
 
-```mermaid
-flowchart TD
-    subgraph S1 ["Etapa 1: Generación de Máscara Diferencial SSIM"]
-        A1[Watermarked Image 1024x684] --> B1[Alineación y Normalización LAB]
-        A2[Clean Thumbnail 400x267] --> C1[Super-Resolución Estructural Previa]
-        C1 --> B1
-        B1 --> D1[Cálculo de Mapa de Error SSIM + Magnitud de Gradiente]
-        D1 --> E1[Umbralización Adaptativa + Dilatación Morfológica]
-        E1 --> F1[Máscara Binaria y Alpha Suavizada]
-    end
+1. **Removes the watermark pattern** via instruction-based editing (`FLUX.1-Kontext-dev`), preserving subject, framing and background.
+2. **Refines each face individually** with an `img2img` pass of `FLUX.1-dev` conditioned on a **LoRA trained on that exact person** (`P4F_A` / `P4F_B`), composited back with a feathered mask. Faces without an assigned identity get a generic detail pass.
+3. **Proves identity preservation**: every output ships a `metrics/task_N_identity.json` with per-face ArcFace cosine similarities against each reference gallery, plus a greedy face↔reference assignment and a pass/warn verdict per face (threshold 0.4).
 
-    subgraph S2 ["Etapa 2: Mapeo de Identidad Facial Multi-Persona"]
-        G1[Fotos Referencia Persona A] --> H1[InsightFace ArcFace 512-d Embedding A]
-        G2[Fotos Referencia Persona B] --> H2[InsightFace ArcFace 512-d Embedding B]
-        A1 --> I1[Detección Facial RetinaFace/SCRFD + 5 Landmarks]
-        I1 --> J1[Asignación Espacial mediante Similitud Coseno]
-        H1 --> J1
-        H2 --> J1
-        J1 --> K1[Vectores Condicionantes de Identidad A y B]
-    end
+Two outputs are kept per task: `task_N_restored.png` (post-edit, pre-upscale — a valid result on its own) and `task_N_final.png` (post-refinement HD).
 
-    subgraph S3 ["Etapa 3: Inpainting Contextual FLUX.2-Fill"]
-        A1 --> L1[Latentes Imagen Corrupta]
-        F1 --> L2[Latentes de Máscara de Oclusión]
-        C1 --> L3[Latente Prior Estructural Thumbnail]
-        K1 --> L4[Latentes de Identidad Cruzada Multi-Referencia]
-        L1 & L2 & L3 & L4 --> M1[FLUX.2-Fill DiT Inpainting Engine]
-        M1 --> N1[Imagen Restaurada en Espacio Latente]
-    end
+## 2. How it works
 
-    subgraph S4 ["Etapa 4: Post-Procesado, Blending y Refinamiento"]
-        N1 --> O1[Decodificación VAE + Poisson Seamless Blending]
-        O1 --> P1[Refinamiento Facial de Micro-Textura CodeFormer/Real-ESRGAN]
-        P1 --> Q1[Validación de Calidad: SSIM, PSNR, ArcFace Cosine Score]
-        Q1 --> R1[Imagen Final Restaurada 1024x684+]
-    end
+```
+watermarked (N).jpg ─┐
+                     ├─► S0 resolve pair ─► S1 watermark mask (thumb diff) ─► S3 Kontext edit ─► S4 FaceLoRA HD ─► final + metrics
+thumb-400 (N).jpg ───┘         │                    ▲                                ▲
+                               │                    │                                │
+identity_person_A/B ─► S2 biometrics (ArcFace refs, vote, verify) ──────────────────┘
 ```
 
----
+### S0 — Input resolution
+Each task index resolves a `watermarked (N).jpg` + `thumb-400 (N).jpg` pair from `data/input/`. The clean thumbnail doubles as structural prior and as identity fallback.
 
-### Descripción Detallada de las Etapas
+### S1 — Watermark masking
+The thumbnail (clean) is upscaled to input size and the **positive luminance difference** isolates the whitish overlay (`watermark_diff_threshold: 18.0`, dilated 2 px). It gates execution (below `watermark_min_fraction` the heavy stages are skipped) and is saved as `debug_watermark.png`. Background-erase segmentation (BEN2) exists only behind the `enable_ben_debug` flag for diagnostics — a full silhouette is the wrong inpainting region.
 
-#### Etapa 1: Generación de Máscara Diferencial mediante SSIM y Análisis Multiescala
-1. **Alineación Geométrica y Cromática:** El thumbnail limpio $I_{\text{thumb}} \in \mathbb{R}^{267 \times 400 \times 3}$ se escala al tamaño de la imagen con marca de agua $I_{\text{wm}} \in \mathbb{R}^{684 \times 1024 \times 3}$ mediante interpolación Lanczos4. Se aplica una transferencia de color y luminancia en el espacio CIELAB para compensar diferencias de compresión JPEG.
-2. **Mapa de Disimilitud Estructural (DSSIM):** Se evalúa la métrica SSIM local con ventana gaussiana ($\sigma = 1.5$):
-   $$\text{DSSIM}(x, y) = \frac{1 - \text{SSIM}(I_{\text{wm}}(x,y), I_{\text{thumb}}(x,y))}{2}$$
-3. **Análisis de Gradiente de Alta Frecuencia:** Las marcas de agua introducen bordes afilados inexistentes en el thumbnail. Se computa la diferencia de norma de gradiente:
-   $$\Delta \nabla I = |\nabla I_{\text{wm}}| - |\nabla I_{\text{thumb}}|$$
-4. **Fusión y Morfología Matemática:** Se combinan DSSIM y $\Delta \nabla I$, aplicando un umbral adaptativo de Otsu seguido de una operación de cierre morfológico y dilatación elíptica ($k = 7\times 7$, 2 iteraciones) y suavizado gaussiano de borde ($\sigma = 2.0$) para evitar artefactos en la frontera del inpainting.
+### S2 — Biometrics (audit-grade, not generative)
+InsightFace detection + ArcFace-512 embeddings per reference gallery, with a **robust mean** (largest face of the full image; faceless images excluded, never zero-padded). Outputs per face: embedding, norm-based quality probe, and a vote (`select_identity`) mapping the visible face to gallery A/B. A `verify_faces` pass computes the **face×reference cosine matrix** with greedy assignment. Note: the PuLID identity-injection branch is retired but preserved behind `identity.injection` — at full weight it dragged similarity 0.70→0.10, so generation stays identity-free and identity lives in measurement + LoRA.
 
-#### Etapa 2: Mapeo y Enrutamiento de Identidad Multi-Persona (InsightFace)
-1. **Bancos de Características de Identidad:** A partir de las imágenes de `/data/identity_person_A/` y `/data/identity_person_B/`, se extraen los vectores normalizados de características faciales $v_A, v_B \in \mathbb{R}^{512}$ utilizando el modelo SOTA ArcFace (backbone IResNet-100 / AntelopeV2):
-   $$\bar{v}_A = \frac{1}{N_A} \sum_{i=1}^{N_A} \frac{\phi(I_{A, i})}{\|\phi(I_{A, i})\|_2}, \quad \hat{v}_A = \frac{\bar{v}_A}{\|\bar{v}_A\|_2}$$
-2. **Detección y Asociación Espacial:** En la imagen de entrada (y su miniatura), se detectan las caras $F_1, F_2, \dots, F_k$ mediante RetinaFace/SCRFD y se extraen sus embeddings $\phi(F_j)$.
-3. **Enrutamiento por Similitud Coseno:**
-   $$S_C(\phi(F_j), \hat{v}_p) = \phi(F_j) \cdot \hat{v}_p \quad (p \in \{A, B\})$$
-   Si $S_C \ge \tau_{\text{match}}$ (típicamente 0.55), la región facial $j$ queda asociada a la identidad correspondiente, construyendo el mapa de atención cruzada e inyección de tokens de identidad.
+### S3 — Instruction-based edit
+`FluxKontextPipeline` (`FLUX.1-Kontext-dev`) with a fixed edit instruction: remove the repeating watermark, keep person/scene/framing identical, add no text. Deterministic seed; Deep GPU-CPU offload; a single `_flush_memory()` before this VRAM-heavy stage.
 
-#### Etapa 3: Inpainting Contextual con FLUX 2 (FLUX.2-Fill)
-1. **Arquitectura Flow Matching DiT (12B Parámetros):** FLUX.2-Fill opera directamente sobre el espacio latente del VAE, procesando conjuntamente la imagen enmascarada, la máscara binaria, la estructura previa del thumbnail y los condicionantes de identidad.
-2. **Condicionamiento Multi-Modal:**
-   * **Canal Estructural:** Proporciona coherencia geométrica global y distribuciones de color procedentes de la miniatura limpia.
-   * **Canal de Identidad Cruzada:** Modula los bloques de atención cruzada (*Cross-Attention Layers*) en las coordenadas espaciales donde se detectó a cada persona, asegurando que la reconstrucción de ojos, nariz, boca y estructura ósea coincida exactamente con la biometría de referencia.
-3. **Muestreador de Flujo Rectificado:** Inferencia acelerada con 28 pasos y escala de guía (CFG) de 3.5 para máxima fidelidad fotográfica y nulo sobre-saturado.
+### S4 — HD upscaling + per-face LoRA refinement (`FaceLoRAUpscaler`)
+1. Global Lanczos upscale to 1920 px long edge.
+2. Per assigned face: square crop (×2.0 expand, ≥512 px) → `FluxImg2ImgPipeline` (FLUX.1-dev, strength 0.45, 28 steps) with **that person's LoRA** (`set_adapters`) and trigger prompt → feathered re-composite. Missing LoRA file ⇒ loud warning + generic pass (never silent).
+3. Legacy `RestoreFormer++` (ONNX) and SUPIR paths remain behind `face_refine_backend: "restoreformer"` / `enable_upscaling`.
 
-#### Etapa 4: Post-Procesado, Seamless Blending y Refinamiento Facial
-1. **Poisson Seamless Blending:** Integración de la región restaurada en el fondo intacto original, resolviendo la ecuación de Poisson con condiciones de frontera de Dirichlet para eliminar discontinuidades de luminancia.
-2. **Refinamiento Facial de Micro-Textura (CodeFormer / Real-ESRGAN):** Restauración de detalles de alta frecuencia (poros de la piel, pestañas, iris) con un parámetro de fidelidad $\omega = 0.85$ para preservar la identidad sin generar rostros artificiales o "plásticos".
-3. **Métricas Automatizadas de Calidad:** Cálculo de PSNR, SSIM, LPIPS y puntuación de verificación biométrica de identidad facial antes de almacenar los resultados.
+## 3. Identity metric protocol
+- **Method**: ArcFace (InsightFace `buffalo_l`) cosine between each detected face of the final image and each gallery mean (computed identically offline in `src/utils/verify_offline.py`).
+- **Assignment**: greedy max, no repeats. **Threshold**: 0.4 → `OK`, else `BAJO UMBRAL` warning (never fails the pipeline).
+- **Artifact**: `metrics/task_N_identity.json` with backend, confidences, selection, pre/post assignments.
 
----
+## 4. Train your own LoRA (per-person, ~1 h on H100)
+Identity LoRAs are personal: the repo ships tools, not weights (`weights/*.safetensors` is git-ignored).
+1. **Curate**: `sbatch slurm/curate_lora.sh` → face+shoulder square crops + `P4F_X` captions + 2 hardest faces held out (`data/lora/`, `manifest.json`). Audit first with `sbatch slurm/audit_dataset.sh` (blur, size, identity outliers, duplicates).
+2. **Train** (diffusers-native DreamBooth, vendored in `scripts/`): `sbatch slurm/train_dreambooth.sh B 1000 8 myrun` (person, steps, rank). Checkpoints mirror to shared storage automatically; resume works across nodes/jobs.
+3. **Select**: `sbatch slurm/check_lora.sh` — rejects NaN/zero-init weights (a silent failure mode we hit: 43M NaNs from a crashed run) and reports norms; pick by held-out cosine.
+4. **Deploy**: copy the winner to `weights/lora_person_{A,B}.safetensors` — the upscaler loads it with a finiteness gate.
+- Reference points: rank 8–16, lr 1e-4, bf16, no prior preservation; B (10 photos) overfits past ~1000 steps — watch samples.
 
-## 3. Estructura del Repositorio
-
+## 5. Repository layout
 ```text
 Pic4Free/
-├── .venv/                         # Entorno virtual de Python (creado dinámicamente)
-├── .cache/                        # Cache local compartida en clúster (HuggingFace, Torch, InsightFace)
-├── data/
-│   ├── identity_person_A/         # Galería de imágenes de referencia del Sujeto A (8 fotos)
-│   ├── identity_person_B/         # Galería de imágenes de referencia del Sujeto B (9 fotos)
-│   ├── input/                     # 98 pares: watermarked (i).jpg y thumb-400 (i).jpg
-│   └── output/
-│       └── run_<JOB_ID>/          # Directorio generado por cada ejecución de Slurm
-│           ├── restored/          # Imágenes finales restauradas a máxima resolución
-│           ├── masks/             # Máscaras generadas por el módulo SSIM diferencial
-│           ├── intermediates/     # Salidas intermedias de inpainting y alineación facial
-│           ├── metrics/           # Reportes JSON/CSV con métricas (SSIM, PSNR, Cosine ID)
-│           └── logs/              # Logs de ejecución por tarea Slurm
-├── examples/                      # Plantillas base del entorno HPC
-│   ├── requirements.txt
-│   └── run_typicality.sh
-├── slurm/                         # Scripts de ejecución por lotes Slurm
-│   ├── restore_array.sh           # Script principal: Slurm Array Job distribuido (0-97)
-│   ├── restore_single.sh          # Script de depuración / ejecución de imagen individual
-│   └── setup_env.sh               # Aprovisionamiento e instalación en nodo de cómputo
-├── src/                           # Código fuente del pipeline en Python
-│   ├── __init__.py
-│   ├── main.py                    # Entrypoint CLI compatible con Slurm Task IDs
-│   ├── config.py                  # Parámetros por defecto, rutas y dataclasses
-│   ├── masking.py                 # Algoritmo de máscara diferencial SSIM + Gradiente
-│   ├── identity.py                # Módulo InsightFace, extracción de embeddings y matching
-│   ├── inpainting.py              # FLUX.2-Fill Pipeline & Flow Matching Inpainting
-│   ├── postprocess.py             # Poisson Blending, CodeFormer / Super-Resolución
-│   └── utils.py                   # I/O, matching de pares de archivos y métricas
-├── requirements.txt               # Dependencias de producción para Python 3.12 + CUDA 12.8
-└── README.md                      # Documentación industrial del proyecto
+├── src/
+│   ├── main.py                    # CLI entry (OmegaConf dotlist args)
+│   ├── pipeline.py                # 4-stage orchestrator + metrics
+│   ├── config.py                  # all knobs (table below)
+│   ├── modules/
+│   │   ├── mask_generator.py      # BEN2 (debug only)
+│   │   ├── identity_extractor.py  # InsightFace/ArcFace + EVA-CLIP + official IDFormer
+│   │   ├── flux_inpainter.py      # Kontext / FLUX.1 paths (+ dormant PuLID wrap)
+│   │   ├── super_resolution.py    # FaceLoRAUpscaler, RestoreFormer++, SUPIR
+│   │   └── pulid_official.py      # vendored PuLID-FLUX modules (dormant)
+│   ├── utils/verify_offline.py    # batch identity audit without GPU
+│   ├── audit_dataset.py           # gallery audit (blur/size/outliers/dupes)
+│   ├── curate_lora.py             # face+shoulder crops + captions + held-out
+│   └── check_lora_weights.py      # NaN/zero-init gate for checkpoints
+├── scripts/train_dreambooth_lora_flux.py  # vendored diffusers trainer (v0.40.0)
+├── slurm/
+│   ├── restore_single.sh  # one task: sbatch ... 0 kontext 1.0 true average
+│   ├── restore_array.sh   # full sweep: sbatch ... (array 0-96)
+│   ├── curate_lora.sh / audit_dataset.sh / check_lora.sh   # CPU jobs
+│   └── train_dreambooth.sh  # GPU LoRA training (own venv)
+├── weights/               # .gitkeep + YOUR safetensors (never committed)
+├── docs/                  # header before/after JPGs (tracked)
+├── data/                  # NOT tracked: bring your own dataset
+│   ├── input/             # watermarked (N).jpg + thumb-400 (N).jpg
+│   ├── identity_person_A/B/
+│   └── output/run_<JOB_ID>/{restored,metrics,logs}/
+├── requirements.txt
+└── README.md
 ```
 
----
-
-## 4. Guía de Despliegue en el Clúster HPC
-
-### Prerrequisitos del Sistema
-* Sistema Operativo: Linux (RHEL 8/9, Rocky Linux, Ubuntu Server 22.04/24.04 LTS).
-* Gestor de Carga de Trabajo: Slurm Workload Manager.
-* Módulos de Clúster requeridos:
-  * `devel/cuda/12.8` (o CUDA 12.x compatible)
-  * `devel/python/3.12.3-gnu-14.2` (o Python 3.11/3.12)
-* Hardware Recomendado por Nodo: GPU NVIDIA H100 (80GB SXM5/PCIe) o A100 (80GB), 8 cpus-per-task, 80GB RAM.
-
----
-
-### Paso 1: Conexión al Clúster y Carga de Módulos
-Inicia sesión en el nodo de login del clúster y navega a la raíz del repositorio:
+## 6. Run it
+Prerequisites: Linux + Slurm, `devel/python/3.12.3` module (**do NOT load any `devel/cuda` module** — it conflicts with the venv's cuDNN), one H100 (80 GB), and `hf_token.txt` with access to the three gated repos (`FLUX.1-dev`, `FLUX.1-Kontext-dev`, `guozinan/PuLID` if you ever re-enable injection).
 
 ```bash
-cd /Pic4Free
+# One image, production settings: TASK BACKEND IDSCALE USE_INPAINT SELECTION
+sbatch slurm/restore_single.sh 0 kontext 1.0 true average
 
-# Carga explícita de los módulos oficiales del clúster
-module purge
-module load devel/cuda/12.8
-module load devel/python/3.12.3-gnu-14.2
-
-# Verificar versiones cargadas
-python3 --version     # Python 3.12.3
-nvcc --version        # Cuda compilation tools, release 12.8
-```
-
----
-
-### Paso 2: Creación del Entorno Virtual e Instalación de Dependencias
-Crea el entorno virtual `.venv` e instala las dependencias optimizadas de `requirements.txt`:
-
-```bash
-# 1. Crear el entorno virtual en la raíz del proyecto
-python3 -m venv .venv
-
-# 2. Activar el entorno
-source .venv/bin/activate
-
-# 3. Actualizar herramientas de empaquetado
-pip install --upgrade pip setuptools wheel
-
-# 4. Instalar dependencias del proyecto
-pip install -r requirements.txt
-```
-
----
-
-### Paso 3: Verificación de CUDA y Acceso a GPU
-Verifica que PyTorch reconozca correctamente el acelerador CUDA y las extensiones necesarias:
-
-```bash
-python3 -c "
-import torch
-print('PyTorch Version:   ', torch.__version__)
-print('CUDA Available:    ', torch.cuda.is_available())
-print('CUDA Version:      ', torch.version.cuda)
-if torch.cuda.is_available():
-    print('Device Name:       ', torch.cuda.get_device_name(0))
-    print('Device Capability: ', torch.cuda.get_device_capability(0))
-"
-```
-
-*(Opcional)* Puedes lanzar el script de aprovisionamiento en un nodo de cómputo GPU mediante Slurm:
-```bash
-sbatch slurm/setup_env.sh
-```
-
----
-
-## 5. Instrucciones de Ejecución con Slurm
-
-Pic4Free está diseñado desde el primer principio para el **procesamiento masivo y desacoplado mediante Slurm Job Arrays**. En lugar de iterar secuencialmente sobre las 98 imágenes en un único script monolítico, el dataset se indexa de forma unívoca y cada tarea del array procesa un único par de imágenes en paralelo sobre la flota de GPUs.
-
-### Mapeo de Identificadores de Tarea (`$SLURM_ARRAY_TASK_ID`)
-El dataset en `/data/input/` contiene 98 pares estructurados:
-* `watermarked.jpg` $\leftrightarrow$ `thumb-400.jpg` (Mapeado a Índice `0`)
-* `watermarked (0).jpg` $\leftrightarrow$ `thumb-400 (0).jpg` (Mapeado a Índice `1`)
-* $\dots$
-* `watermarked (96).jpg` $\leftrightarrow$ `thumb-400 (96).jpg` (Mapeado a Índice `97`)
-
-El runner en Python (`src/main.py`) recibe `--task_id ${SLURM_ARRAY_TASK_ID}` y resuelve automáticamente el par correspondiente de forma robusta e independiente.
-
----
-
-### 5.1 Ejecución Completa en Ráfaga (Slurm Array Job)
-Para procesar las 98 imágenes simultáneamente en el clúster (con un límite de concurrencia de hasta 16 GPUs simultáneas para respetar las políticas de cuota):
-
-```bash
+# Full dataset (tasks 0-96, 16 concurrent GPUs)
 sbatch slurm/restore_array.sh
+
+# Troubleshoot a single identity without the array
+sbatch --array=42 slurm/restore_array.sh
 ```
 
-#### Parámetros Principales de `slurm/restore_array.sh`:
-```bash
-#SBATCH --job-name=Pic4Free_array
-#SBATCH --output=slurm_logs/slurm_%A_%a.out
-#SBATCH --error=slurm_logs/slurm_%A_%a.err
-#SBATCH --partition=gpu_h100_short
-#SBATCH --nodes=1
-#SBATCH --ntasks=1
-#SBATCH --cpus-per-task=8
-#SBATCH --mem=80GB
-#SBATCH --gres=gpu:1
-#SBATCH --time=0:30:00
-#SBATCH --array=0-97%16
-```
+`main.py` takes OmegaConf dotlist args (`task_id=0 job_id=x paths.input_dir=... flux.backend=kontext ...`); every `.sh` flag maps 1:1 to the table below. First run per node downloads ~45 GB of weights (slow once, then cached).
 
-> **Nota:** `%A` representa el ID maestro del Job Array y `%a` representa el número de tarea individual (`$SLURM_ARRAY_TASK_ID`).
+### Outputs per task
+- `restored/task_N_restored.png` — post-edit, pre-upscale (first-class result).
+- `restored/task_N_final.png` — HD + per-face refinement.
+- `restored/task_N_debug_watermark.png` (+ `debug_mask.png` only with BEN debug on).
+- `metrics/task_N_identity.json` — backend, confidences, selection, injected identity, pre/post face assignments with cosines.
+- `logs/` — Slurm log copies.
 
----
+## 7. Configuration reference
+All fields live in `src/config.py` (OmegaConf-mergeable from CLI as `section.field=value`):
 
-### 5.2 Ejecución de un Subconjunto o Imagen Individual
-Para depuración, optimización de hiperparámetros o procesar solo una porción del dataset:
+| Key | Type | Default | What it does |
+|---|---|---|---|
+| `task_id` / `job_id` | str | `"0"` / `"manual"` | Task index + run tag (output folder `run_<job_id>`) |
+| `paths.input_dir` | str | `data/input` | `watermarked (N).jpg` + `thumb-400 (N).jpg` pairs |
+| `paths.identity_a_dir` / `identity_b_dir` | str | `data/identity_person_A/B` | Reference galleries (also LoRA training source) |
+| `paths.output_dir` | str | `data/output/run_default` | Overridden per Slurm job |
+| `masking.model_id` | str | `PramaLLC/BEN2` | Debug-only segmenter (see `enable_ben_debug`) |
+| `masking.ssim_threshold` | float | 0.65 | Legacy gate, currently unused |
+| `masking.enable_ben_debug` | bool | false | Download+run BEN for `debug_mask.png` only |
+| `masking.watermark_diff_threshold` | float | 18.0 | Positive-luminance delta (0–255) vs thumbnail |
+| `masking.watermark_dilate_px` | int | 2 | Dilation of the watermark mask (7px merged dense patterns) |
+| `masking.watermark_min_fraction` | float | 0.0005 | Below this, heavy stages are skipped |
+| `identity.model_name` | str | `adaface_ir101` | Historical name (backbone is InsightFace/EVA-CLIP) |
+| `identity.margin_adaptation` | bool | true | Norm-as-quality confidence path on/off |
+| `identity.confidence_divisor` | float | 35.0 | Raw ArcFace norm → [0,1] quality probe |
+| `identity.match_threshold` | float | 0.4 | Cosine gate: warn-only, never fails the task |
+| `identity.selection` | str | `average` | `average`/`auto` (thumb vote)/`A`/`B` identity for injection |
+| `identity.injection` | str | `none` | `pulid` reactivates dormant injection (needs full biometrics) |
+| `identity.metric_only` | bool | true | Skip EVA+IDFormer (~4 min/task); ArcFace-only audit |
+| `flux.model_id` | str | `black-forest-labs/FLUX.1-dev` | Base for img2img refinement |
+| `flux.backend` | str | `flux` | `kontext` = production path (CLI passes it explicitly) |
+| `flux.kontext_model_id` | str | `black-forest-labs/FLUX.1-Kontext-dev` | Instruction-based editor |
+| `flux.edit_instruction` | str | (see config) | Watermark-removal instruction, framing-preserving |
+| `flux.num_inference_steps` | int | 35 | Denoising steps (Kontext path) |
+| `flux.guidance_scale` | float | 3.5 | 2.5 auto-selected for kontext by the `.sh` |
+| `flux.seed` | int | 42 | Deterministic generation |
+| `flux.prompt` | str | (see config) | Legacy T2I prompt (retired flux path) |
+| `flux.id_scale` / `dropout_p` | float | 1.0 / 0.0 | Dormant PuLID knobs (kept parametric) |
+| `flux.pulid_model_id` / `pulid_ckpt_file` | str | `guozinan/PuLID` / `pulid_flux_v0.9.1.safetensors` | Dormant (the repo has no `pulid_flux.safetensors`) |
+| `flux.use_inpaint_pipeline` | bool | true | Legacy latent-blend flag (retired: caused rainbow collapse) |
+| `flux.hf_token_file` | str | `hf_token.txt` | Token fallback chain: arg > env > file |
+| `superres.model_id` / `scale_factor` | str/int | `SUPIR` / 2 | Legacy SUPIR path (disabled) |
+| `superres.face_fidelity_weight` | float | 0.85 | Legacy, currently unused |
+| `superres.enable_face_refinement` | bool | true | Master switch for Stage 4 |
+| `superres.enable_upscaling` | bool | false | SUPIR global upscale (off: costly, unvalidated) |
+| `superres.target_long_edge` | int | 1920 | HD output size (not 4K by design) |
+| `superres.face_refine_backend` | str | `lora` | `lora` per-face img2img, or `restoreformer` legacy |
+| `superres.flux_model_id` | str | `black-forest-labs/FLUX.1-dev` | img2img base for refinement |
+| `superres.lora_a_path` / `lora_b_path` | str | `weights/lora_person_{A,B}.safetensors` | Missing file ⇒ loud warning + generic pass |
+| `superres.lora_trigger_a` / `lora_trigger_b` | str | `P4F_A` / `P4F_B` | Must match training triggers |
+| `superres.lora_strength` | float | 0.45 | Recorded decision: no global tuning on 1–2 tasks (optimum is per-image); adaptive scheme parked |
+| `superres.lora_guidance` / `lora_steps` | float/int | 3.5 / 28 | Per-face refinement sampling |
+| `superres.lora_crop_expand` / `lora_feather_px` / `lora_min_crop` | float/int/int | 2.0 / 24 / 512 | Crop geometry + feathered re-composite |
+| `superres.refine_unassigned` | bool | true | Unassigned faces get the generic pass |
 
-* **Procesar una sola imagen mediante Slurm Array:**
-  ```bash
-  # Ejecuta únicamente la tarea 0 (watermarked.jpg)
-  sbatch --array=0 slurm/restore_array.sh
+## 8. Known limitations (read before trusting outputs)
+- **LoRA data hunger**: B (10 photos) underperforms A; rank 8 + ≤1000 steps is the ceiling without overfitting. More diverse photos beat more steps.
+- **Generic refinement drifts identity** (0.51→0.30 cosine): always train the LoRA; the generic fallback is a validator, not a product path.
+- **Profile faces**: both ArcFace matching and LoRA transfer degrade off-frontal; thresholds assume near-frontal.
+- **Per-node scratch**: checkpoints/train artifacts live on compute-node scratch — every producer job copies finals to shared storage (`weights/`, `data/lora/dblora_*`). Never assume cross-node visibility.
+- **Transient Xids**: two `illegal memory access` crashes on different nodes traced to infra (bitsandbytes×Hopper for one, unknown-transient for the other); everything resumes from shared checkpoints, and LoRAs are finiteness-gated on load.
+- **Threshold 0.4** is calibrated on 2 subjects — re-tune it if your cast grows.
 
-  # Ejecuta únicamente la imagen con índice 42
-  sbatch --array=42 slurm/restore_array.sh
-  ```
+## 9. License & responsible use
+- Model weights follow their own licenses, notably the **FLUX.1-dev Non-Commercial License** (research/personal use). LoRAs you train inherit these terms.
+- This repository exists to restore photographs, not to fabricate identities: do not use it on people without consent, and do not present restored faces as evidentiary material. The cosine gate is a quality signal, not a biometric verdict.
 
-* **Procesar un rango específico (ej. las primeras 10 imágenes):**
-  ```bash
-  sbatch --array=0-9%4 slurm/restore_array.sh
-  ```
-
-* **Ejecutar el script individual de depuración interactiva:**
-  ```bash
-  # Pasa el task_id como argumento directo
-  sbatch slurm/restore_single.sh 0
-  ```
-
----
-
-### 5.3 Ejecución Local / Sesión Interactiva (`salloc`)
-Si dispones de una sesión interactiva en un nodo GPU (`salloc --partition=gpu_h100_short --gres=gpu:1 --mem=80GB --cpus-per-task=8 --time=01:00:00`):
-
-```bash
-source .venv/bin/activate
-
-# Restaurar la imagen índice 5 con configuración estándar
-python3 src/main.py \
-    --task_id 5 \
-    --job_id manual_test \
-    --input_dir data/input \
-    --identity_a_dir data/identity_person_A \
-    --identity_b_dir data/identity_person_B \
-    --output_dir data/output/run_manual_test \
-    --num_inference_steps 28 \
-    --guidance_scale 3.5 \
-    --ssim_threshold 0.65 \
-    --enable_face_refinement
-```
-
----
-
-## 6. Monitorización, Telemetría y Resultados
-
-### Comandos Útiles de Monitorización en Slurm
-
-```bash
-# Ver estado de todas las tareas activas de tu usuario
-squeue -u $USER
-
-# Ver resumen de estado y consumo de recursos de un Job Array
-sacct -j <JOB_ID> --format=JobID,JobName,Partition,AllocCPUS,State,ExitCode,Elapsed,MaxRSS
-
-# Cancelar todas las tareas de un array en ejecución
-scancel <JOB_ID>
-
-# Ver log en tiempo real de una tarea específica
-tail -f slurm_logs/slurm_<JOB_ID>_<TASK_ID>.out
-```
-
-### Estructura de Salida por Job ID
-Cada ejecución crea automáticamente un subdirectorio aislado en `/data/output/run_<JOB_ID>/`:
-
-* `restored/`: Contiene `watermarked (i)_restored.png` a resolución completa con colorimetría corregida y rostros preservados.
-* `masks/`: Contiene `watermarked (i)_mask.png` (máscara binaria) y `watermarked (i)_diff.png` (mapa de disimilitud SSIM).
-* `intermediates/`: Contiene cultivos faciales alineados, mapas de atención y latentes previos.
-* `metrics/`: Contiene `metrics_task_<TASK_ID>.json` con métricas de similitud facial, SSIM residual y tiempos de inferencia.
-* `logs/`: Contiene copia sincronizada de los ficheros `.out` y `.err` generados por Slurm.
-
----
-
-## 7. Tabla de Hiperparámetros de Configuración
-
-| Parámetro | Tipo | Valor por Defecto | Descripción |
-| :--- | :---: | :---: | :--- |
-| `--task_id` | `int` | `0` | Índice unívoco de la imagen dentro del dataset (0 a 97). |
-| `--job_id` | `str` | `manual` | Identificador del trabajo Slurm para estructurar la carpeta de salida. |
-| `--num_inference_steps` | `int` | `28` | Número de pasos del muestreador Flow Matching de FLUX.2-Fill. |
-| `--guidance_scale` | `float` | `3.5` | Escala de Classifier-Free Guidance (CFG). |
-| `--ssim_threshold` | `float` | `0.65` | Umbral mínimo de disimilitud para considerar un píxel como marca de agua. |
-| `--face_fidelity_weight` | `float` | `0.85` | Ponderación de fidelidad biométrica en el refinamiento facial de CodeFormer. |
-| `--enable_face_refinement` | `bool` | `True` | Activa la etapa de mejora de micro-textura facial post-inpainting. |
-| `--dilation_kernel_size` | `int` | `7` | Tamaño del kernel morfológico para englobar bordes difusos de la marca de agua. |
-
----
-
-## 8. Licencia y Buenas Prácticas de Investigación
-Este repositorio ha sido desarrollado para proyectos de preservación y restauración fotográfica de alta fidelidad en entornos de supercomputación. Queda estrictamente prohibido el uso no ético o la manipulación no autorizada de identidades biométricas.
+## 10. Tooling map (where to look next)
+- New identity to enroll → `audit_dataset.sh` → `curate_lora.sh` → `train_dreambooth.sh` → `check_lora.sh` → drop into `weights/` → production `restore_array.sh`.
+- Suspect a run → `restored/` PNGs → `metrics/*_identity.json` → Slurm log (`_flush_memory`, `[MÉTRICA]`, `[FaceLoRA]`, `[SELECCIÓN]` markers).
+- Reproduce anything → fixed `seed: 42` + logged effective config per run.

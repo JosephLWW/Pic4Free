@@ -229,3 +229,17 @@ huggingface_token.txt
 .env
 .env.*
 !.env.example
+
+# -----------------------------
+# Pic4Free: personal / generated artifacts (never committed)
+# -----------------------------
+# Custom per-person LoRA weights: everyone trains their own (see README,
+# "Train your own LoRA"). The downloader weights live here at runtime.
+weights/*.safetensors
+weights/*.ckpt
+!weights/.gitkeep
+# Runtime outputs (restored images, metrics, logs).
+data/output/
+slurm_logs/
+# Local throwaway venv used for quick experiments.
+test_venv/
