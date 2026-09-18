@@ -8,8 +8,8 @@ try:
     from ben2 import BEN_Base
 except ImportError as e:
     raise ImportError(
-        "El paquete 'ben2' no está instalado. Instálalo con "
-        "'pip install -r requirements.txt' (incluye BEN2 desde GitHub)."
+        "The package 'ben2' no this installed. Instalalo with "
+        "'pip install -r requirements.txt' (includes BEN2 from GitHub)."
     ) from e
 
 logger = logging.getLogger("Pic4Free.MaskGenerator")
@@ -22,30 +22,30 @@ class BENMaskGenerator:
     def __init__(self, model_id: str, device: str = "cuda"):
         self.model_id = model_id
         self.device = device
-        logger.info(f"Inicializando BENMaskGenerator con modelo: {self.model_id} en {self.device}")
+        logger.info(f"Initializing BENMaskGenerator with model: {self.model_id} in {self.device}")
         
         try:
             self.model = BEN_Base.from_pretrained(
                 self.model_id
             ).to(self.device)
             self.model.eval()
-            logger.info("Modelo BEN cargado exitosamente.")
+            logger.info("BEN model loaded successfully.")
         except Exception as e:
-            logger.error(f"Error al cargar el modelo BEN: {e}")
+            logger.error(f"Error loading BEN model: {e}")
             raise
     
     @torch.no_grad()
     def generate_mask(self, image: Union[Image.Image, np.ndarray]) -> torch.Tensor:
         """
-        Inferencia Zero-Shot para extraer el canal alfa.
+        Zero-shot inference to extract the alpha channel.
         
         Args:
             image: Imagen original (watermarked).
             
         Returns:
-            torch.Tensor: Máscara alfa (0.0 a 1.0 flotante).
+            torch.Tensor: Alpha mask (floating-point 0.0 to 1.0).
         """
-        logger.info("Generando máscara con BEN + CGM...")
+        logger.info("Generating mask with BEN + CGM...")
         
         if isinstance(image, np.ndarray):
             image = Image.fromarray(image).convert("RGB")
@@ -55,30 +55,30 @@ class BENMaskGenerator:
         original_size = image.size # (width, height)
         
         try:
-            # BEN2 inference devuelve directamente un objeto PIL.Image
+            # BEN2 inference returns a PIL.Image object directly
             outputs = self.model.inference(image)
             
-            # Soporte nativo para manejo de un solo output o un batch
+            # Native support for handling either a single output or a batch
             if isinstance(outputs, list):
                 result_image = outputs[0]
             else:
                 result_image = outputs
                 
             if isinstance(result_image, Image.Image):
-                # Extraer el canal alfa si es RGBA, de lo contrario fallback a escala de grises
+                # Extract the alpha channel if RGBA, otherwise fall back to grayscale
                 if result_image.mode == 'RGBA':
                     mask_pil = result_image.split()[-1]
                 else:
                     mask_pil = result_image.convert('L')
                 
-                # Convertir a tensor normalizado [0, 1] y mover al dispositivo activo
+                # Convert to a normalized tensor [0, 1] and move to the active device
                 mask = transforms.ToTensor()(mask_pil).to(self.device)
             elif isinstance(result_image, torch.Tensor):
                 mask = result_image
             else:
-                raise TypeError(f"Formato de salida inesperado de BEN2: {type(result_image)}")
+                raise TypeError(f"Unexpected BEN2 output shapet: {type(result_image)}")
             
-            # Redimensionar al tamaño original usando interpolación bilineal
+            # Resize to the original size using bilinear interpolation
             if mask.dim() == 3: mask = mask.unsqueeze(0)
             mask = torch.nn.functional.interpolate(
                 mask, 
@@ -89,5 +89,5 @@ class BENMaskGenerator:
             return mask.clamp(0, 1)
             
         except Exception as e:
-            logger.error(f"Error durante la inferencia BEN: {e}")
+            logger.error(f"Error during BEN inference: {e}")
             raise

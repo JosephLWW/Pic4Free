@@ -1,15 +1,15 @@
 # -*- coding: utf-8 -*-
-"""Adaptador e ID-encoder oficiales de PuLID-FLUX, vendados sin modificar.
+"""Official PuLID-FLUX adapter and ID encoder, vendored without modification.
 
 Fuente: https://github.com/ToTheBeginning/PuLID  (Apache-2.0, ByteDance Inc.)
   - pulid/encoders_transformer.py: FeedForward, PerceiverAttentionCA,
     PerceiverAttention, IDFormer.
 
-Compatibles 1:1 con el checkpoint guozinan/PuLID/pulid_flux_v0.9.x.safetensors:
-  - rama `pulid_ca.{i}`  -> PerceiverAttentionCA (20 ramas)
-  - rama `pulid_encoder` -> IDFormer
-Cargar ambas con load_state_dict(strict=True): cualquier divergencia debe
-fallar en voz alta, nunca degenerar en capas aleatorias ("cara random").
+1:1 compatible with the checkpoint guozinan/PuLID/pulid_flux_v0.9.x.safetensors:
+  - `pulid_ca.{i}` branch  -> PerceiverAttentionCA (20 branches)
+  - `pulid_encoder` branch -> IDFormer
+Load both with load_state_dict(strict=True): any divergence must
+fail loudly, never degraof into random layers ("face random").
 """
 import math
 
@@ -56,7 +56,7 @@ class PerceiverAttentionCA(nn.Module):
         """
         Args:
             x (torch.Tensor): id embedding, shape (b, n_id, 2048)
-            latents (torch.Tensor): stream de imagen del DiT, shape (b, n_img, 3072)
+            latents (torch.Tensor): DiT image stream, shape (b, n_img, 3072)
         """
         x = self.norm1(x)
         latents = self.norm2(latents)

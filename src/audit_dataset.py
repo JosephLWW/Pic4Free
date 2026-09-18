@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Auditoría de datasets de identidad (CPU).
+"""Identity dataset audit (CPU).
 
-Por cada imagen de A/B reporta:
-  - n_faces, tamaño relativo de la mayor (área cara / área imagen)
-  - blur (varianza del Laplaciano, OpenCV) y brillo medio
-  - coseno ArcFace vs media del directorio (outliers = otra persona/mala toma)
-  - duplicados por hash perceptual (dHash)
-Veredicto por imagen: KEEP / REVIEW / DROP + motivo.
-Filtros activados por CLI (ver --help). No borra nada: solo informa.
+For each A/B image, reports:
+  - n_faces, relative size of the largest (face area / image area)
+  - blur (Laplacian variance, OpenCV) and mean brightness
+  - ArcFace cosine vs directory mean (outliers = different person/bad shot)
+  - duplicates by perceptual hash (dHash)
+Verdict per image: KEEP / REVIEW / DROP + reason.
+Filters enabled via CLI (see --help). Does not delete anything; only reports.
 
 Uso:
     python src/audit_dataset.py --a-dir data/identity_person_A \
@@ -35,8 +35,8 @@ def load_app():
 
 
 def laplacian_var(gray: np.ndarray) -> float:
-    # OpenCV >=5 no soporta ciertas combinaciones (p.ej. float32->float64):
-    # cualquier fallo cae al fallback numpy.
+    # OpenCV >=5 does not support certain combinations (e.g. float32->float64):
+    # any failure falls back to NumPy.
     try:
         import cv2
 
@@ -83,12 +83,12 @@ def audit_dir(app, d, args):
         try:
             faces = app.get(arr)
         except Exception as e:
-            row.update(verdict="REVIEW", reasons=[f"detector fallo: {e}"])
+            row.update(verdict="REVIEW", reasons=[f"detector failure: {e}"])
             rows.append(row)
             continue
         row["n_faces"] = len(faces)
         if not faces:
-            row.update(verdict="DROP", reasons=["sin rostros"])
+            row.update(verdict="DROP", reasons=["no faces"])
             rows.append(row)
             continue
         faces = sorted(faces, key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]), reverse=True)
@@ -97,10 +97,10 @@ def audit_dir(app, d, args):
         emb = getattr(faces[0], "normed_embedding", None)
         row["emb"] = normed(emb).tolist() if emb is not None else None
         if emb is None:
-            row.update(verdict="REVIEW", reasons=["sin embedding"])
+            row.update(verdict="REVIEW", reasons=["no embedding"])
         rows.append(row)
 
-    # Segunda pasada: coseno vs media + duplicados + umbrales.
+    # Second pass: cosine vs mean + duplicates + thresholds.
     embs = [np.array(r["emb"]) for r in rows if r.get("emb") is not None]
     mean = np.mean(embs, axis=0) if embs else None
     if mean is not None:
@@ -114,19 +114,19 @@ def audit_dir(app, d, args):
             del r["emb"]
             if r["cos_vs_mean"] < args.cos_min:
                 r["verdict"] = "REVIEW"
-                r["reasons"].append(f"posible otra persona/mala toma (cos={r['cos_vs_mean']})")
+                r["reasons"].append(f"possible different person/bad shot (cos={r['cos_vs_mean']})")
         elif "emb" in r:
             del r["emb"]
         if r.get("face_frac", 1.0) < args.min_face_frac:
             r["verdict"] = "REVIEW" if r["verdict"] == "KEEP" else r["verdict"]
-            r["reasons"].append(f"cara pequeña (frac={r['face_frac']})")
+            r["reasons"].append(f"small face (frac={r['face_frac']})")
         if r.get("blur", 1e9) < args.blur_min:
             r["verdict"] = "REVIEW" if r["verdict"] == "KEEP" else r["verdict"]
-            r["reasons"].append(f"borrosa (laplaciano={r['blur']})")
+            r["reasons"].append(f"blurry (laplaciano={r['blur']})")
         h = r.get("dhash")
         if h in seen_hash:
             r["verdict"] = "DROP" if r["verdict"] != "REVIEW" else r["verdict"]
-            r["reasons"].append(f"duplicada de {seen_hash[h]}")
+            r["reasons"].append(f"duplicate of {seen_hash[h]}")
         else:
             seen_hash[h] = r["file"]
     return rows
@@ -158,7 +158,7 @@ def main():
                 print(f"  [{r['verdict']}] {r['file']}: {'; '.join(r['reasons'])}", flush=True)
     with open(os.path.join(args.out, "audit.json"), "w") as fh:
         json.dump(report, fh, indent=2)
-    print(f"[audit] JSON en {args.out}/audit.json", flush=True)
+    print(f"[audit] JSON in {args.out}/audit.json", flush=True)
 
 
 if __name__ == "__main__":

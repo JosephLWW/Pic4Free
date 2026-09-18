@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Auditoría de pesos LoRA: ¿aprendieron algo o siguen ~cero de init?
+"""LoRA weight audit: Did they learn anything or remain ~zero from initialization?
 
-PEFT inicializa lora_B = 0: un LoRA sin entrenar da efecto EXACTAMENTE cero.
-Reporta por fichero: nº tensores, fracción de lora_B con norma ~0,
-norma media de lora_A/B y top de normas. CPU, sin GPU.
+PEFT inicializa lora_B = 0: un An untrained LoRA has EXACTLY zero effect.
+Reports per file: tensor count, fraction of lora_B with norm ~0,
+mean lora_A/B norm and top norms. CPU, without GPU.
 """
 import argparse
 import json
@@ -50,13 +50,13 @@ def main():
     try:
         import torch  # noqa: F401
     except ImportError as e:
-        print(f"[check] torch no disponible: {e}", flush=True)
+        print(f"[check] torch unavailable: {e}", flush=True)
         return 2
 
     report = {}
     for p in args.weights:
         if not os.path.isfile(p):
-            report[p] = {"error": "no existe"}
+            report[p] = {"error": "does not exist"}
             continue
         try:
             r = audit(p)
@@ -66,7 +66,7 @@ def main():
         print(f"[check] {p}: {json.dumps(r)}", flush=True)
     with open(args.out, "w") as fh:
         json.dump(report, fh, indent=2)
-    print(f"[check] JSON en {args.out}", flush=True)
+    print(f"[check] JSON in {args.out}", flush=True)
     return 0
 
 

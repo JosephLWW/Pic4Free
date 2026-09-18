@@ -1,5 +1,5 @@
 #!/bin/bash
-# Auditoría de datasets de identidad (CPU): no borra nada, solo informa.
+# Identity dataset audit (CPU): does not delete anything; only reports.
 #SBATCH --job-name=Pic4Free_audit
 #SBATCH --output=slurm_logs/slurm_%j.out
 #SBATCH --error=slurm_logs/slurm_%j.err
@@ -19,12 +19,12 @@ hash -r
 module purge
 module load devel/python/3.12.3-gnu-14.2
 
-WORKDIR="${SLURM_SUBMIT_DIR:?SLURM_SUBMIT_DIR no está definido}"
+WORKDIR="${SLURM_SUBMIT_DIR:?SLURM_SUBMIT_DIR is not defined}"
 WORKDIR="$(cd "${WORKDIR}" && pwd)"
 cd "${WORKDIR}"
 
 if [[ -z "${PIC4FREE_CACHE_ROOT:-}" && -z "${SCRATCH:-}" && -z "${TMPDIR:-}" ]]; then
-    echo "ERROR: No existe SCRATCH/TMPDIR para cachés." >&2
+    echo "ERROR: SCRATCH/TMPDIR does not exist for caches." >&2
     exit 1
 fi
 
@@ -50,7 +50,7 @@ if [[ ! -f "${REQ_HASH_FILE}" || "$(cat "${REQ_HASH_FILE}" 2>/dev/null || echo)"
     "${PYTHON_BIN}" -m pip install --disable-pip-version-check --no-cache-dir --upgrade pip setuptools wheel
     "${PYTHON_BIN}" -m pip install --disable-pip-version-check --no-cache-dir -r "${WORKDIR}/requirements.txt"
 else
-    echo "[audit] Requisitos ya instalados; reutilizando venv."
+    echo "[audit] Requirements already installed; reusing the venv."
 fi
 
 mkdir -p data/lora

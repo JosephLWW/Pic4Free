@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Re-evaluación multi-rostro offline de finales ya generados (CPU, sin GPU).
+"""Offline multi-face re-evaluation of already-generated results (CPU, without GPU).
 
-Para cada run/task: detecta hasta 2 rostros del PNG final y calcula la matriz
-de cosenos contra las referencias A y B POR SEPARADO (no promediadas), con
-asignación greedy. Imprime tabla y guarda JSON.
+For each run/task: detects up to 2 faces in the final PNG and computes the matrix
+cosine matrix against references A and B SEPARATELY (no averaged), with
+greedy assignment. Prints a table and saves JSON.
 
 Uso:
     python src/verify_offline.py --runs data/output/run_X ... \
@@ -62,7 +62,7 @@ def dir_mean(app, d):
         if fs:
             vecs.append(fs[0]["emb"])
     if not vecs:
-        raise RuntimeError(f"Sin rostros en {d} ({n} imágenes vistas).")
+        raise RuntimeError(f"No faces in {d} ({n} images vistas).")
     m = np.mean(vecs, axis=0)
     return m / (np.linalg.norm(m) + 1e-12), len(vecs), n
 
@@ -82,14 +82,14 @@ def main():
     ref_a, n_a, seen_a = dir_mean(app, args.a_dir)
     ref_b, n_b, seen_b = dir_mean(app, args.b_dir)
     refs = {"A": ref_a, "B": ref_b}
-    print(f"[verify] refs: A={n_a}/{seen_a} rostros, B={n_b}/{seen_b} rostros.", flush=True)
+    print(f"[verify] refs: A={n_a}/{seen_a} faces, B={n_b}/{seen_b} faces.", flush=True)
 
     summary = {"refs": {"A": {"faces": n_a, "seen": seen_a}, "B": {"faces": n_b, "seen": seen_b}}, "runs": {}}
     for run, task in zip(args.runs, args.tasks if len(args.tasks) > 1 else [args.tasks[0]] * len(args.runs)):
         final = os.path.join(run, "restored", f"task_{task}_final.png")
         entry = {"final": final, "faces": [], "assignment": {}}
         if not os.path.isfile(final):
-            entry["note"] = "sin PNG final"
+            entry["note"] = "without PNG final"
             summary["runs"][os.path.basename(run)] = entry
             continue
         faces = faces_of(app, final, top_k=args.top_k)
@@ -112,13 +112,13 @@ def main():
         summary["runs"][os.path.basename(run)] = entry
         print(f"[verify] {os.path.basename(run)} task={task}:", flush=True)
         for f in entry["faces"]:
-            print(f"  rostro {f['idx']}: " + " ".join(f"{k}={c:.3f}" for k, c in f["cosines"].items()), flush=True)
+            print(f"  face {f['idx']}: " + " ".join(f"{k}={c:.3f}" for k, c in f["cosines"].items()), flush=True)
         for fi, a in entry["assignment"].items():
-            print(f"  -> rostro {fi} asignado a {a['ref']} (cos={a['cosine']:.3f})", flush=True)
+            print(f"  -> face {fi} assigned a {a['ref']} (cos={a['cosine']:.3f})", flush=True)
 
     with open(args.out, "w") as fh:
         json.dump(summary, fh, indent=2)
-    print(f"[verify] JSON en {args.out}", flush=True)
+    print(f"[verify] JSON in {args.out}", flush=True)
 
 
 if __name__ == "__main__":

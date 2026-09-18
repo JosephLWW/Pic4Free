@@ -19,8 +19,8 @@ logger = logging.getLogger("Pic4Free.Pipeline")
 
 class Pic4FreeRestorationPipeline:
     """
-    Orquestador principal de las 4 etapas de restauración SOTA.
-    Implementa "Sequential Stage Swapping" para evasión de OOM en nodos de 80GB+.
+    Main orchestrator for the four SOTA restoration stages.
+    Implements "Sequential Stage Swapping" to avoid OOM on 80GB+ nodes.
     """
     def __init__(self, config: PipelineConfig):
         self.config = config
@@ -28,11 +28,11 @@ class Pic4FreeRestorationPipeline:
         self.host_device = "cpu"
         self.active_device = "cuda" if torch.cuda.is_available() else "cpu"
         
-        logger.info("Cargando todos los modelos estáticos a la RAM del host (CPU)...")
+        logger.info("Loading all static models into host RAM (CPU)...")
 
         # Token HF centralizado: env > config.flux.hf_token_file > hf_token.txt.
-        # El .sh exporta HF_TOKEN y pasa flux.hf_token_file; los módulos lo reciben
-        # como parámetro en vez de leer rutas relativas por su cuenta.
+        # the .sh exports HF_TOKEN and passes flux.hf_token_file; the modules receive
+        # as a parameter instead of reading relative paths itself.
         hf_token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
         if not hf_token:
             token_file = getattr(config.flux, "hf_token_file", "hf_token.txt") or "hf_token.txt"
@@ -42,10 +42,10 @@ class Pic4FreeRestorationPipeline:
         if hf_token:
             logger.info("HF token resuelto (longitud %d).", len(hf_token))
         else:
-            logger.warning(f"Sin HF token: la descarga de {config.flux.model_id} (repo gated) puede fallar con 401.")
+            logger.warning(f"No HF token: the download of {config.flux.model_id} (repo gated) may fail with 401.")
 
-        # Etapa 1 (toggle masking.enable_ben_debug: BEN hoy solo produce el
-        # PNG de debug; false = ni se descarga el modelo ni se ejecuta).
+        # Stage 1 (toggle masking.enable_ben_debug: BEN currently only produces the
+        # PNG of debug; false = neither downloads nor runs the model).
         if bool(getattr(config.masking, "enable_ben_debug", True)):
             self.mask_generator = BENMaskGenerator(
                 model_id=config.masking.model_id,
@@ -53,15 +53,15 @@ class Pic4FreeRestorationPipeline:
             )
         else:
             self.mask_generator = None
-            logger.info("BEN desactivado por config (enable_ben_debug=false).")
+            logger.info("BEN disabled by config (enable_ben_debug=false).")
 
-        # Etapa 2
+        # Stage 2
         self.identity_extractor = PulidIdentityExtractor(
             config=config,
             device=self.host_device
         )
 
-        # Etapa 3
+        # Stage 3
         self.inpainter = FluxPuLIDInpainter(
             model_id=config.flux.model_id,
             pulid_model_id=config.flux.pulid_model_id,
@@ -70,7 +70,7 @@ class Pic4FreeRestorationPipeline:
             hf_token=hf_token,
         )
 
-        # Etapa 4
+        # Stage 4
         self.super_res = SUPIRRestoreFormer(
             model_id=config.superres.model_id,
             scale_factor=config.superres.scale_factor,
@@ -81,7 +81,7 @@ class Pic4FreeRestorationPipeline:
         )
 
     def _flush_memory(self):
-        """Manejo severo y explícito de GC y VRAM"""
+        """Strict, explicit GC and VRAM handling"""
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
@@ -91,17 +91,17 @@ class Pic4FreeRestorationPipeline:
 
     def _resolve_input_image(self) -> tuple:
         """
-        Selecciona el par de imágenes de input correspondiente al task_id.
+        Selects the input image pair corresponding to task_id.
 
-        Convención de nombres en data/input/:
-          - watermarked (N).jpg  →  imagen principal (alta resolución, con marca de agua)
-          - thumb-400 (N).jpg    →  miniatura de referencia (imagen limpia, baja resolución)
+        Naming convention in data/input/:
+          - watermarked (N).jpg    main image (high resolution, with watermark)
+          - thumb-400 (N).jpg      reference thumbnail (clean, low-resolution image)
 
         Returns:
-            Tupla (input_path, thumb_path) con las rutas absolutas.
+            Tuple (input_path, thumb_path) with the absolute paths.
 
         Raises:
-            FileNotFoundError: Si alguno de los ficheros no existe.
+            FileNotFoundError: If any of the files do not exist.
         """
         task_idx = int(self.config.task_id)
         input_dir = Path(self.config.paths.input_dir)
@@ -111,42 +111,42 @@ class Pic4FreeRestorationPipeline:
 
         if not watermarked_path.is_file():
             raise FileNotFoundError(
-                f"[ETAPA 0] Imagen principal no encontrada: '{watermarked_path}'. "
-                f"Asegúrate de que existe 'watermarked ({task_idx}).jpg' en '{input_dir}'."
+                f"[STAGE 0] Main image not found: '{watermarked_path}'. "
+                f"Ensure that 'watermarked ({task_idx}).jpg' in '{input_dir}'."
             )
         if not thumb_path.is_file():
             raise FileNotFoundError(
-                f"[ETAPA 0] Miniatura de referencia no encontrada: '{thumb_path}'. "
-                f"Asegúrate de que existe 'thumb-400 ({task_idx}).jpg' en '{input_dir}'."
+                f"[STAGE 0] Reference thumbnail not found: '{thumb_path}'. "
+                f"Ensure that 'thumb-400 ({task_idx}).jpg' in '{input_dir}'."
             )
 
         logger.info(
-            f"[ETAPA 0] Par de imágenes para task_id={task_idx}: "
+            f"[STAGE 0] Image pair for task_id={task_idx}: "
             f"input='{watermarked_path.name}' | ref='{thumb_path.name}'"
         )
         return str(watermarked_path), str(thumb_path)
 
     def _resolve_identity_paths(self, identity_dir: str) -> List[str]:
         """
-        Recolecta las rutas de imágenes válidas desde el directorio de identidad
-        configurado. Soporta .jpg, .jpeg, .png, .webp.
+        Collect valid image paths from the identity directory
+        configured. Supports .jpg, .jpeg, .png, .webp.
 
         Args:
-            identity_dir: Ruta al directorio que contiene las fotos de referencia
-                          de la persona cuya identidad se quiere preservar.
+            identity_dir: Path to the directory containing reference photos
+                          of the person whose identity should be preserved.
 
         Returns:
-            Lista de rutas de archivo absolutas ordenadas.
+            List of sorted absolute file paths.
 
         Raises:
-            FileNotFoundError: Si el directorio no existe.
-            ValueError: Si el directorio existe pero no contiene ninguna imagen.
+            FileNotFoundError: If the directory does not exist.
+            ValueError: if the directory exists but contains no images.
         """
         dir_path = Path(identity_dir)
         if not dir_path.is_dir():
             raise FileNotFoundError(
-                f"[ETAPA 2] Directorio de identidad no encontrado: '{identity_dir}'. "
-                "Comprueba que 'paths.identity_a_dir' apunta a la carpeta correcta."
+                f"[STAGE 2] Identity directory not found: '{identity_dir}'. "
+                "Check that 'paths.identity_a_dir' points to the correct directory."
             )
 
         image_paths = sorted(
@@ -156,28 +156,28 @@ class Pic4FreeRestorationPipeline:
 
         if not image_paths:
             raise ValueError(
-                f"[ETAPA 2] El directorio de identidad '{identity_dir}' existe pero no "
-                f"contiene imágenes con extensiones soportadas: {self.SUPPORTED_IMG_EXTENSIONS}. "
-                "Añade al menos una foto de referencia de la persona."
+                f"[STAGE 2] The identity directory '{identity_dir}' exists but does not "
+                f"contains images with supported extensions: {self.SUPPORTED_IMG_EXTENSIONS}. "
+                "Add at least one reference photo of the person."
             )
 
         logger.info(
-            f"[ETAPA 2] {len(image_paths)} imagen(es) de referencia encontradas en "
+            f"[STAGE 2] {len(image_paths)} reference image(s) found in "
             f"'{identity_dir}': {[Path(p).name for p in image_paths]}"
         )
         return image_paths
 
     def _watermark_mask(self, input_image: Image.Image, thumb_image: Image.Image) -> torch.Tensor:
-        """Máscara de la marca de agua por diferencia contra la miniatura limpia.
+        """Watermark mask from the difference against the clean thumbnail.
 
-        La thumb es la misma foto sin overlay: tras reescalarla al tamaño de la
-        entrada, se usa la diferencia POSITIVA de luminancia (el overlay
-        blanquecino solo suma luz). Esto rechaza el ruido simétrico de
-        compresión/reescalado, que la diferencia absoluta sí capturaba.
-        Solo torch/numpy, sin cv2.
+        The thumb is the same photo without the overlay: after resizing it to the size of the
+        input, use the POSITIVE luminance difference (the overlay
+        whitish overlay only adds light). This rejects symmetric noise from
+        compression/resizing, because the absolute difference captured it.
+        Solo torch/numpy, without cv2.
 
         Returns:
-            Tensor float (1, 1, H, W) en CPU, 1.0 = regenerar.
+            Float tensor (1, 1, H, W) on CPU, 1.0 = regenerate.
         """
         import torch.nn.functional as Fnn
 
@@ -188,7 +188,7 @@ class Pic4FreeRestorationPipeline:
         ref = thumb_image.convert("RGB").resize((W, H), Image.LANCZOS)
         a = torch.from_numpy(np.array(input_image.convert("RGB"), dtype=np.float32))
         b = torch.from_numpy(np.array(ref, dtype=np.float32))
-        # Luminancia Rec.601; overlay claro => dpos > 0 solo en la marca.
+        # Luminance Rec.601; overlay claro => dpos > 0 only in the mark.
         lum_a = 0.299 * a[..., 0] + 0.587 * a[..., 1] + 0.114 * a[..., 2]
         lum_b = 0.299 * b[..., 0] + 0.587 * b[..., 1] + 0.114 * b[..., 2]
         dpos = lum_a - lum_b  # (H, W)
@@ -202,29 +202,29 @@ class Pic4FreeRestorationPipeline:
 
     def run(self) -> str:
         """
-        Ejecuta el pipeline orquestando el Swapping Secuencial a la GPU.
+        Runs the pipeline, orchestrating sequential swapping on the GPU.
         """
-        logger.info("=== INICIANDO PIPELINE SOTA (SEQUENTIAL SWAP) ===")
+        logger.info("=== STARTING PIPELINE SOTA (SEQUENTIAL SWAP) ===")
         start_time = time.time()
         
         try:
             # ---------------------------------------------------------
-            # Etapa 0: Selección de imágenes de entrada
+            # Stage 0: Selection of input images
             # ---------------------------------------------------------
             input_path, thumb_path = self._resolve_input_image()
             input_image = Image.open(input_path).convert("RGB")
             thumb_image = Image.open(thumb_path).convert("RGB")
             logger.info(
-                f"[ETAPA 0] Imagen cargada: {Path(input_path).name} "
+                f"[STAGE 0] Image loaded: {Path(input_path).name} "
                 f"({input_image.width}x{input_image.height}px) | "
-                f"Referencia: {Path(thumb_path).name} "
+                f"Reference: {Path(thumb_path).name} "
                 f"({thumb_image.width}x{thumb_image.height}px)"
             )
 
             # ---------------------------------------------------------
-            # Etapa 1: Masking
+            # Stage 1: Masking
             # ---------------------------------------------------------
-            logger.info("[ETAPA 1] Segmentación y Aislamiento de Máscaras")
+            logger.info("[STAGE 1] Mask Segmentation and Isolation")
             t0 = time.time()
             
             if self.mask_generator is not None:
@@ -240,15 +240,15 @@ class Pic4FreeRestorationPipeline:
                     _T.ToPILImage()(_m.clamp(0, 1)).save(os.path.join(_dbg_dir, f"task_{self.config.task_id}_debug_mask.png"))
                     logger.info(f"[DEBUG] mask mean={float(_m.mean()):.3f} min={float(_m.min()):.3f} max={float(_m.max()):.3f}")
                 except Exception as _e:
-                    logger.warning(f"[DEBUG] no se pudo guardar la máscara: {_e}")
+                    logger.warning(f"[DEBUG] could not save the mask: {_e}")
                 self.mask_generator.model.to(self.host_device)
             else:
                 mask = None
-                logger.info("[ETAPA 1] BEN omitido (enable_ben_debug=false).")
+                logger.info("[STAGE 1] BEN omitido (enable_ben_debug=false).")
 
-            # Máscara de inpainting = zona de la marca de agua (thumb limpia vs
-            # watermarked). La máscara BEN (silueta completa) NO se usa para
-            # inpaintar: regenerar la silueta entera destruye a la persona.
+            # Inpainting mask = watermark area (clean thumb vs
+            # watermarked). the BEN mask (full silhouette) is NOT used for
+            # inpainting: regenerating the entire silhouette destroys the person.
             wm_mask = self._watermark_mask(input_image, thumb_image)
             wm_frac = float(wm_mask.mean())
             try:
@@ -260,25 +260,25 @@ class Pic4FreeRestorationPipeline:
                     os.path.join(_dbg_dir, f"task_{self.config.task_id}_debug_watermark.png")
                 )
             except Exception as _e:
-                logger.warning(f"[DEBUG] no se pudo guardar la máscara watermark: {_e}")
-            logger.info(f"[ETAPA 1] máscara watermark: fracción={wm_frac:.4f} (BEN solo debug)")
+                logger.warning(f"[DEBUG] could not save the mask watermark: {_e}")
+            logger.info(f"[STAGE 1] mask watermark: fraction={wm_frac:.4f} (BEN only debug)")
 
-            logger.info(f"Etapa 1 completada en {time.time() - t0:.2f}s")
+            logger.info(f"Stage 1 completada in {time.time() - t0:.2f}s")
             
             # ---------------------------------------------------------
-            # Etapa 2: Biometría — Identidades A y B
+            # Stage 2: Facial Biometrics  Identities A and B
             # ---------------------------------------------------------
-            logger.info("[ETAPA 2] Biometría Facial y Mapeo de Identidad (A + B)")
+            logger.info("[STAGE 2] Facial Biometrics and Identity Mapping (A + B)")
             t0 = time.time()
 
-            # La miniatura limpia (thumb) actúa como fallback de identidad si un
-            # directorio A/B falta, está vacío o su extracción falla.
+            # the thumbnail clean (thumb) actua as fallback of identity if un
+            # directory A/B missing, this empty or su extraction fails.
             def _paths_or_thumb(identity_dir: str, label: str) -> List[str]:
                 try:
                     return self._resolve_identity_paths(identity_dir)
                 except (FileNotFoundError, ValueError, OSError) as e:
                     logger.warning(
-                        f"[ETAPA 2] {label}: {e} -> fallback a miniatura limpia '{Path(thumb_path).name}' "
+                        f"[STAGE 2] {label}: {e} -> fallback to clean thumbnail '{Path(thumb_path).name}' "
                         f"({thumb_image.width}x{thumb_image.height}px)."
                     )
                     return [thumb_path]
@@ -294,7 +294,7 @@ class Pic4FreeRestorationPipeline:
                 except Exception as e:
                     if paths != [thumb_path]:
                         logger.warning(
-                            f"[ETAPA 2] {label}: extracción falló ({e}) -> reintento con miniatura limpia."
+                            f"[STAGE 2] {label}: extraction failed ({e}) -> retrying with clean thumbnail."
                         )
                         return self.identity_extractor.extract_identity([thumb_path])
                     raise
@@ -304,22 +304,22 @@ class Pic4FreeRestorationPipeline:
 
             self.identity_extractor.to(self.host_device)
 
-            # Referencias SEPARADAS (no promediadas: A+B mezclados no
-            # representan a ninguna de las dos personas).
+            # References SEPARADAS (no averaged: A+B mixed no
+            # represent two people).
             ref_arcs = {}
             if "arcface" in id_a:
                 ref_arcs["A"] = id_a["arcface"]
             if "arcface" in id_b:
                 ref_arcs["B"] = id_b["arcface"]
-            # Selección de identidad para inyección (config identity.selection):
-            # "average" = promedio A+B (comportamiento histórico),
-            # "auto" = vota la thumb y usa solo la ganadora,
+            # Identity selection for injection (config identity.selection):
+            # "average" = average A+B (behavior historical),
+            # "auto" = the thumb votes and uses only the winner,
             # "A"/"B" = manual.
             sel = str(getattr(self.config.identity, "selection", "average")).lower()
             if sel in ("a", "b") and sel.upper() in ref_arcs:
                 chosen = sel.upper()
                 combined_embeddings = id_a["embeddings"] if chosen == "A" else id_b["embeddings"]
-                logger.info(f"[ETAPA 2] selección manual: solo identidad {chosen}.")
+                logger.info(f"[STAGE 2] manual selection: only identity {chosen}.")
             elif sel == "auto" and ref_arcs:
                 vote = self.identity_extractor.select_identity(thumb_image, ref_arcs)
                 chosen = vote.get("label")
@@ -329,16 +329,16 @@ class Pic4FreeRestorationPipeline:
                     combined_embeddings = id_b["embeddings"]
                 else:
                     logger.warning(
-                        f"[ETAPA 2] voto no concluyente ({vote.get('note')}): promedio A+B."
+                        f"[STAGE 2] vote no concluyente ({vote.get('note')}): average A+B."
                     )
                     combined_embeddings = (id_a["embeddings"] + id_b["embeddings"]) / 2.0
                     chosen = "A+B(fallback)"
-                logger.info(f"[ETAPA 2] selección auto: identidad {chosen} {vote.get('cosines', {})}.")
+                logger.info(f"[STAGE 2] automatic selection: identity {chosen} {vote.get('cosines', {})}.")
             else:
                 if tuple(id_a["embeddings"].shape) != tuple(id_b["embeddings"].shape):
                     raise ValueError(
-                        f"Embeddings A {tuple(id_a['embeddings'].shape)} y B "
-                        f"{tuple(id_b['embeddings'].shape)} incompatibles para fusionar."
+                        f"Embeddings A {tuple(id_a['embeddings'].shape)} and B "
+                        f"{tuple(id_b['embeddings'].shape)} incompatible for fusion."
                     )
                 combined_embeddings = (id_a["embeddings"] + id_b["embeddings"]) / 2.0
                 chosen = "A+B"
@@ -349,29 +349,29 @@ class Pic4FreeRestorationPipeline:
             }
 
             logger.info(
-                f"Etapa 2 completada en {time.time() - t0:.2f}s | "
+                f"Stage 2 completed in {time.time() - t0:.2f}s | "
                 f"Confianza A={id_a['confidence']:.3f} B={id_b['confidence']:.3f} | "
                 f"Norma A={id_a['norm']:.2f} B={id_b['norm']:.2f}"
             )
             
             # ---------------------------------------------------------
-            # Etapa 3: Inpainting (FLUX)
+            # Stage 3: Inpainting (FLUX)
             # ---------------------------------------------------------
-            logger.info("[ETAPA 3] Inpainting Latente de Máxima Calidad")
+            logger.info("[STAGE 3] Maximum-Quality Latent Inpainting")
             t0 = time.time()
 
-            # Limpieza profunda SOLO antes de FLUX (etapa intensiva en VRAM).
-            # torch.cuda.empty_cache() bloquea/sincroniza la GPU: no usar tras cada etapa.
+            # Deep cleanup ONLY before FLUX (the VRAM-intensive stage).
+            # torch.cuda.empty_cache() bloquea/sincroniza the GPU: no use after each stage.
             self._flush_memory()
 
-            # diffusers usa .enable_model_cpu_offload() para mover inteligentemente
-            # solo los bloques necesarios (VAE, Transformer) a la VRAM.
+            # diffusers uses .enable_model_cpu_offload() for mover inteligentemente
+            # only the necessary blocks (VAE, Transformer) to VRAM.
 
             min_frac = float(getattr(self.config.masking, "watermark_min_fraction", 0.0005))
             if wm_frac < min_frac:
                 logger.warning(
-                    f"[ETAPA 3] Sin marca de agua detectable (fracción={wm_frac:.5f} < {min_frac}): "
-                    "se omite FLUX y se conserva la imagen original."
+                    f"[STAGE 3] No detectable watermark (fraction={wm_frac:.5f} < {min_frac}): "
+                    "FLUX is skipped and the original image is preserved."
                 )
                 _w, _h = input_image.size
                 restored_image = input_image.resize((((_w // 16) * 16), ((_h // 16) * 16)), Image.LANCZOS)
@@ -390,34 +390,34 @@ class Pic4FreeRestorationPipeline:
                 _ra = _np.array(restored_image.convert("RGB"), dtype=_np.float32)
                 logger.info(f"[DEBUG] flux out size={restored_image.size} mean={float(_ra.mean()):.1f}")
             except Exception as _e:
-                logger.warning(f"[DEBUG] no se pudo guardar el output de FLUX: {_e}")
+                logger.warning(f"[DEBUG] could not save the output of FLUX: {_e}")
 
-            logger.info(f"Etapa 3 completada en {time.time() - t0:.2f}s")
+            logger.info(f"Stage 3 completada in {time.time() - t0:.2f}s")
 
-            # Swap real: con refino LoRA viene un segundo DiT 12B (+2º T5);
-            # sin descargar este, ambos conviven en RAM y el nodo muere (OOM).
+            # Swap real: with refinement LoRA viene un segundo DiT 12B (+2o T5);
+            # without download this, both coexist in RAM and the noof dies (OOM).
             if str(getattr(self.config.superres, "face_refine_backend", "lora")).lower() == "lora":
                 try:
                     self.inpainter.unload()
                 except Exception as _e:
-                    logger.warning(f"Unload Etapa 3 omitido ({_e}).")
+                    logger.warning(f"Unload Stage 3 omitido ({_e}).")
 
             # ---------------------------------------------------------
-            # Etapa 4: Super-Resolución
+            # Stage 4: Super-Resolution
             # ---------------------------------------------------------
             if self.config.superres.enable_face_refinement:
-                logger.info("[ETAPA 4] Post-Procesamiento y Super-Resolución")
+                logger.info("[STAGE 4] Post-Processing and Super-Resolution")
                 t0 = time.time()
 
-                # Asignación cara↔ref SOBRE la restaurada (pre-upscale): el
-                # refino LoRA la necesita para dar a cada cara su LoRA.
-                pre_faces = {"faces": [], "assignment": {}, "min_assigned": None, "note": "no evaluada"}
+                # Asignacion faceref SOBRE the restored (pre-upscale): the
+                # Face refinement needs a LoRA to give each face its own LoRA.
+                pre_faces = {"faces": [], "assignment": {}, "min_assigned": None, "note": "not evaluated"}
                 try:
                     if ref_arcs:
                         pre_faces = self.identity_extractor.verify_faces(restored_image, ref_arcs, top_k=2)
-                        logger.info(f"[ETAPA 4] pre-asignación: {pre_faces.get('assignment', {})}")
+                        logger.info(f"[STAGE 4] pre-assignment: {pre_faces.get('assignment', {})}")
                 except Exception as _e:
-                    logger.warning(f"[ETAPA 4] pre-asignación omitida: {_e}")
+                    logger.warning(f"[STAGE 4] pre-assignment skipped: {_e}")
 
                 self.super_res.face_restorer.to(self.active_device)
                 self.super_res.supir_model.to(self.active_device)
@@ -428,34 +428,34 @@ class Pic4FreeRestorationPipeline:
                 self.super_res.supir_model.to(self.host_device)
 
 
-                logger.info(f"Etapa 4 completada en {time.time() - t0:.2f}s")
+                logger.info(f"Stage 4 completada in {time.time() - t0:.2f}s")
             else:
                 final_image = restored_image
-                pre_faces = {"faces": [], "assignment": {}, "min_assigned": None, "note": "etapa omitida"}
+                pre_faces = {"faces": [], "assignment": {}, "min_assigned": None, "note": "stage skipped"}
             
-            # Métrica objetiva de identidad (discriminativa, rol AdaFace/ArcFace):
-            # matriz cada-rostro-final × cada-referencia (A, B por separado).
-            # Solo informa (warning bajo umbral); nunca tumba el pipeline.
-            identity_metric = {"faces": [], "assignment": {}, "min_assigned": None, "note": "no evaluada"}
+            # Objective identity metric (discriminative, AdaFace/ArcFace role):
+            # matriz each-face-final  each-reference (A, B separately).
+            # Only in shape (warning below threshold); never fails the pipeline.
+            identity_metric = {"faces": [], "assignment": {}, "min_assigned": None, "note": "not evaluated"}
             try:
                 if ref_arcs:
                     identity_metric = self.identity_extractor.verify_faces(final_image, ref_arcs, top_k=2)
                     thr = float(getattr(self.config.identity, "match_threshold", 0.4))
                     for _f in identity_metric.get("faces", []):
-                        logger.info(f"[MÉTRICA] rostro {_f['idx']} cosenos={_f.get('cosines', {})}")
+                        logger.info(f"[METRICA] face {_f['idx']} cosines={_f.get('cosines', {})}")
                     for _fi, _a in identity_metric.get("assignment", {}).items():
                         _msg = (
-                            f"[MÉTRICA] rostro {_fi} -> ref {_a['ref']} "
-                            f"cos={_a['cosine']:.3f} umbral={thr}"
+                            f"[METRICA] face {_fi} -> ref {_a['ref']} "
+                            f"cos={_a['cosine']:.3f} threshold={thr}"
                         )
                         if _a["cosine"] < thr:
-                            logger.warning(_msg + " -> BAJO UMBRAL, revisar identidad.")
+                            logger.warning(_msg + " -> BAJO UMBRAL, revisar identity.")
                         else:
                             logger.info(_msg + " -> OK.")
                     if not identity_metric.get("assignment"):
-                        logger.warning("[MÉTRICA] sin asignación cara↔ref: no evaluable.")
+                        logger.warning("[METRICA] no facereference assignment: cannot evaluate.")
             except Exception as _e:
-                logger.warning(f"[MÉTRICA] verificación de identidad omitida: {_e}")
+                logger.warning(f"[METRICA] identity verification skipped: {_e}")
             try:
                 import json as _json
                 _mdir = os.path.join(self.config.paths.output_dir, "metrics")
@@ -477,21 +477,21 @@ class Pic4FreeRestorationPipeline:
                         indent=2,
                     )
             except Exception as _e:
-                logger.warning(f"[MÉTRICA] no se pudo guardar el JSON: {_e}")
+                logger.warning(f"[METRICA] could not save the JSON: {_e}")
 
-            # Guardar salida
+            # Save output
             os.makedirs(os.path.join(self.config.paths.output_dir, "restored"), exist_ok=True)
             output_path = os.path.join(self.config.paths.output_dir, "restored", f"task_{self.config.task_id}_final.png")
             final_image.save(output_path)
             
             total_time = time.time() - start_time
-            logger.info(f"=== PIPELINE COMPLETADO en {total_time:.2f}s ===")
+            logger.info(f"=== PIPELINE COMPLETADO in {total_time:.2f}s ===")
             return output_path
             
         except torch.cuda.OutOfMemoryError:
-            logger.error("FATAL: OutOfMemoryError incluso con Sequential Swapping.")
+            logger.error("FATAL: OutOfMemoryError even with Sequential Swapping.")
             self._flush_memory()
             raise
         except Exception as e:
-            logger.error(f"Error en el pipeline: {e}")
+            logger.error(f"Error in the pipeline: {e}")
             raise

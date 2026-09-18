@@ -1,5 +1,5 @@
 #!/bin/bash
-# LoRA DreamBooth nativo diffusers (venv del pipeline: torch+diffusers+peft).
+# LoRA DreamBooth native diffusers (pipeline venv: torch+diffusers+peft).
 # Uso: sbatch slurm/train_dreambooth.sh <A|B> <steps> <rank> [tag]
 #SBATCH --job-name=Pic4Free_dblora
 #SBATCH --output=slurm_logs/slurm_%j.out
@@ -26,7 +26,7 @@ STEPS="${2:?steps}"
 RANK="${3:?rank}"
 TAG="${4:-${PERSON}}"
 
-WORKDIR="${SLURM_SUBMIT_DIR:?SLURM_SUBMIT_DIR no está definido}"
+WORKDIR="${SLURM_SUBMIT_DIR:?SLURM_SUBMIT_DIR is not defined}"
 WORKDIR="$(cd "${WORKDIR}" && pwd)"
 cd "${WORKDIR}"
 
@@ -60,19 +60,19 @@ export LD_LIBRARY_PATH="${VENV}/lib/python3.12/site-packages/nvidia/cudnn/lib:${
 
 OUTDIR="${WORKDIR}/data/lora/dblora_${TAG}"
 mkdir -p "${OUTDIR}"
-# OUTDIR en compartido (/pfs): los checkpoints sobreviven a timeouts y a
-# cambios de nodo. Lección aprendida: en scratch local, un TIMEOUT pierde
-# todo lo no persistido (el epílogo no se ejecuta).
+# OUTDIR on shared storage (/pfs): checkpoints survive timeouts and a
+# noof changes. Lesson learned: on local scratch, a TIMEOUT loses
+# anything not persisted (the epilogue does not run).
 
-# El dataset DreamBooth de diffusers abre TODO lo que haya en el directorio
-# (incluidos los .txt de captions de ai-toolkit) -> staging solo-imágenes.
+# The diffusers DreamBooth dataset opens EVERYTHING in the directory
+# (including ai-toolkit caption .txt files) -> image-only staging.
 STAGE_DIR="${CACHE_ROOT}/dblora_stage/${TAG}"
 rm -rf "${STAGE_DIR}"
 mkdir -p "${STAGE_DIR}"
 find "${WORKDIR}/data/lora/train_${PERSON}" -maxdepth 1 -type f \
     \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' \) \
     -exec cp -t "${STAGE_DIR}" {} +
-echo "[dblora] staging: $(ls "${STAGE_DIR}" | wc -l) imágenes en ${STAGE_DIR}"
+echo "[dblora] staging: $(ls "${STAGE_DIR}" | wc -l) images in ${STAGE_DIR}"
 
 # shellcheck disable=SC2086
 "${PYTHON_BIN}" -m accelerate.commands.launch --mixed_precision=bf16 \
@@ -100,7 +100,7 @@ echo "[dblora] staging: $(ls "${STAGE_DIR}" | wc -l) imágenes en ${STAGE_DIR}"
     --output_dir="${OUTDIR}"
 TRAIN_EXIT=$?
 
-# Persistir a compartido: último checkpoint + muestras + finitud B.
+# Persist to shared storage: latest checkpoint + samples + B finiteness.
 PERSIST="${WORKDIR}/data/lora/dblora_${TAG}"
 mkdir -p "${PERSIST}"
 LAST_CKPT="$(ls -dt "${OUTDIR}"/checkpoint-* 2>/dev/null | head -1 || true)"
@@ -110,13 +110,13 @@ fi
 find "${OUTDIR}" -maxdepth 2 -name "*.png" -newermt "-1 day ago" 2>/dev/null | head -8 | while read -r _F; do
     cp -n "${_F}" "${PERSIST}/" 2>/dev/null || true
 done
-# Espejo completo de checkpoints a compartido (resume entre nodos distintos).
+# Full checkpoint mirror to shared storage (resume across different nodes).
 for _C in "${OUTDIR}"/checkpoint-*; do
     [[ -d "${_C}" ]] || continue
     _B="$(basename "${_C}")"
     [[ -d "${PERSIST}/${_B}" ]] || cp -r "${_C}" "${PERSIST}/" 2>/dev/null || true
 done
-"${PYTHON_BIN}" - <<PY 2>/dev/null || echo "[dblora] Sin safetensors final para auditar (revisar log)."
+"${PYTHON_BIN}" - <<PY 2>/dev/null || echo "[dblora] No final safetensors to audit (check log)."
 import glob, struct, json
 files = sorted(glob.glob("${PERSIST}/checkpoint-*/**/*.safetensors", recursive=True))
 print("checkpoints persistidos:", files)

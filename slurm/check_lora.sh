@@ -1,5 +1,5 @@
 #!/bin/bash
-# Auditoría de pesos LoRA (CPU): ¿aprendieron o siguen ~cero de init?
+# LoRA weight audit (CPU): learned or remain ~zero of initialization?
 #SBATCH --job-name=Pic4Free_checklora
 #SBATCH --output=slurm_logs/slurm_%j.out
 #SBATCH --error=slurm_logs/slurm_%j.err
@@ -19,7 +19,7 @@ hash -r
 module purge
 module load devel/python/3.12.3-gnu-14.2
 
-WORKDIR="${SLURM_SUBMIT_DIR:?SLURM_SUBMIT_DIR no está definido}"
+WORKDIR="${SLURM_SUBMIT_DIR:?SLURM_SUBMIT_DIR is not defined}"
 WORKDIR="$(cd "${WORKDIR}" && pwd)"
 cd "${WORKDIR}"
 
@@ -40,7 +40,7 @@ if [[ ! -f "${REQ_HASH_FILE}" || "$(cat "${REQ_HASH_FILE}" 2>/dev/null || echo)"
     "${PYTHON_BIN}" -m pip install --disable-pip-version-check --no-cache-dir -r "${WORKDIR}/requirements.txt"
 fi
 
-# Uso: sbatch slurm/check_lora.sh [out.json] [ficheros...] (defecto: weights/)
+# Uso: sbatch slurm/check_lora.sh [out.json] [files...] (defecto: weights/)
 OUT_JSON="${1:-data/output/lora_audit.json}"
 shift || true
 if [[ $# -eq 0 ]]; then

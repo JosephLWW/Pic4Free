@@ -28,7 +28,7 @@ logging.basicConfig(
 logger = logging.getLogger("Pic4Free.Main")
 
 def main():
-    # Carga configuración desde CLI vía OmegaConf
+    # Load configuration from the CLI via OmegaConf
     cli_args = sys.argv[1:]
     config = load_config(cli_args)
     

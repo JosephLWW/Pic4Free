@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Curaduría Fase 0 para LoRA por persona (CPU).
+"""Phase 0 LoRA curation per person (CPU).
 
-Por cada directorio de identidad (A/B):
-  - Detecta rostros (InsightFace, la cara mayor).
-  - Omite imágenes sin rostro (con warning) — p.ej. 3 conocidas en A.
-  - Recorta cuadrado cara+hombros (bbox x CROP_EXPAND, clip) + JPEG q95.
-  - Escribe caption .txt con trigger (P4F_A / P4F_B).
-  - Reserva held-out: las 2 con cara más pequeña (casos duros) para
-    selección de checkpoint por coseno ArcFace.
+For each identity directory (A/B):
+  - Detects faces (InsightFace, the largest face).
+  - Skips images without a face (with warning), e.g. 3 known images in A.
+  - Crops a square around the face and shoulders (bbox x CROP_EXPAND, clip) + JPEG q95.
+  - Writes a .txt caption with trigger (P4F_A / P4F_B).
+  - Held-out reservation: the 2 images with the smallest faces (hard cases) for
+    checkpoint selection by ArcFace cosine.
 
-Salida:
+Output:
   data/lora/train_{A,B}/, data/lora/heldout_{A,B}/, data/lora/manifest.json
 
 Uso:
@@ -46,7 +46,7 @@ def area(f):
 def curate(app, src_dir, dst_train, dst_held, trigger, held_n=2, freeze=None):
     import shutil
 
-    # Regeneración total: evita recortes huérfanos de imágenes eliminadas.
+    # Full regeneration: avoids orphaned crops of deleted images.
     for _d in (dst_train, dst_held):
         if os.path.isdir(_d):
             shutil.rmtree(_d)
@@ -67,10 +67,10 @@ def curate(app, src_dir, dst_train, dst_held, trigger, held_n=2, freeze=None):
         try:
             faces = app.get(np.array(img))
         except Exception as e:
-            print(f"  [skip] {name}: detección fallo ({e})", flush=True)
+            print(f"  [skip] {name}: detection failed ({e})", flush=True)
             continue
         if not faces:
-            print(f"  [skip] {name}: sin rostros", flush=True)
+            print(f"  [skip] {name}: no faces", flush=True)
             continue
         best = max(faces, key=area)
         x1, y1, x2, y2 = (float(v) for v in best.bbox)
@@ -87,15 +87,15 @@ def curate(app, src_dir, dst_train, dst_held, trigger, held_n=2, freeze=None):
             print(f"  [skip] {name}: recorte degenerado", flush=True)
             continue
         found.append({"src": name, "crop": img.crop(box), "area": area(best)})
-    # Held-out: por defecto las de cara más pequeña (casos duros); si existe
-    # manifest previo con --freeze-heldout, se conservan esos ficheros para
-    # que los cosenos sean comparables entre versiones del dataset.
+    # Held-out: by default the of face most small (hard cases); if exists
+    # previous manifest with --freeze-heldout, is preserve esos files for
+    # so cosines are comparable across dataset versions.
     frozen = set(freeze or [])
     if frozen:
         held = [d for d in found if os.path.splitext(d["src"])[0] in frozen]
         missing = frozen - {os.path.splitext(d["src"])[0] for d in found}
         for m in sorted(missing):
-            print(f"  [heldout] {m} ya no disponible/con rostro; queda fuera.", flush=True)
+            print(f"  [heldout] {m} already unavailable/with face; remains out.", flush=True)
     else:
         found.sort(key=lambda d: d["area"])
         held = found[: min(held_n, max(0, len(found) - 1))]
@@ -130,7 +130,7 @@ def main():
     ap.add_argument(
         "--freeze-heldout",
         action="store_true",
-        help="Conserva el heldout del manifest existente (comparabilidad).",
+        help="Keep heldout from the existing manifest (comparability).",
     )
     args = ap.parse_args()
 
@@ -143,9 +143,9 @@ def main():
                 old = json.load(fh)
             for label in ("A", "B"):
                 prev[label] = set(old.get(label, {}).get("heldout_files", []))
-            print(f"[curate] heldout congelado: { {k: sorted(v) for k, v in prev.items()} }", flush=True)
+            print(f"[curate] held-out frozen: { {k: sorted(v) for k, v in prev.items()} }", flush=True)
         except Exception as e:
-            print(f"[curate] sin manifest previo utilizable ({e}); selección nueva.", flush=True)
+            print(f"[curate] without previous manifest usesble ({e}); new selection.", flush=True)
     manifest = {}
     for label, src, trig in (("A", args.a_dir, args.trigger_a), ("B", args.b_dir, args.trigger_b)):
         print(f"[curate] {label}: {src}", flush=True)
@@ -161,7 +161,7 @@ def main():
         print(f"[curate] {label}: {manifest[label]}", flush=True)
     with open(os.path.join(args.out, "manifest.json"), "w") as fh:
         json.dump(manifest, fh, indent=2)
-    print(f"[curate] manifest en {args.out}/manifest.json", flush=True)
+    print(f"[curate] manifest in {args.out}/manifest.json", flush=True)
 
 
 if __name__ == "__main__":
