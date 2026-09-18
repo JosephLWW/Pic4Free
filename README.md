@@ -124,6 +124,30 @@ sbatch --array=42 slurm/restore_array.sh
 
 The application entrypoint is `python -m pic4free.core.main` with `PYTHONPATH=src`, and it takes OmegaConf dotlist args (`task_id=0 job_id=x paths.input_dir=... flux.backend=kontext ...`). The Slurm wrappers set `PYTHONPATH` and invoke the same module entrypoint. First run per node downloads ~45 GB of weights (slow once, then cached).
 
+### Direct module entrypoints
+
+Run these commands from the repository root. `PYTHONPATH=src` makes the package importable without installing the repository:
+
+```bash
+export PYTHONPATH="${PWD}/src:${PYTHONPATH:-}"
+
+# Production restoration pipeline
+python -m pic4free.core.main task_id=0 job_id=manual
+
+# CPU dataset and checkpoint tools
+python -m pic4free.cli.audit_dataset --help
+python -m pic4free.cli.curate_lora --help
+python -m pic4free.cli.check_lora_weights --help
+
+# Offline identity verification
+python -m pic4free.utils.verify_offline --help
+
+# Low-level DreamBooth trainer
+python -m pic4free.training.train_dreambooth_lora_flux --help
+```
+
+The trainer requires a prepared image directory and many model/training arguments, so use `sbatch slurm/train_dreambooth.sh A|B STEPS RANK [TAG]` for the supported cluster workflow. The Slurm wrappers configure the virtual environment, dependencies, caches, authentication, GPU settings, and `PYTHONPATH` automatically.
+
 ### Outputs per task
 - `restored/task_N_restored.png` — post-edit, pre-upscale (first-class result).
 - `restored/task_N_final.png` — HD + per-face refinement.
