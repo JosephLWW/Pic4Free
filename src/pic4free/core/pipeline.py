@@ -9,11 +9,11 @@ import time
 from pathlib import Path
 from typing import List
 
-from src.config import PipelineConfig
-from src.modules.mask_generator import BENMaskGenerator
-from src.modules.identity_extractor import PulidIdentityExtractor
-from src.modules.flux_inpainter import FluxPuLIDInpainter
-from src.modules.super_resolution import SUPIRRestoreFormer
+from pic4free.core.config import PipelineConfig
+from pic4free.models.mask_generator import BENMaskGenerator
+from pic4free.models.identity_extractor import PulidIdentityExtractor
+from pic4free.models.flux_inpainter import FluxPuLIDInpainter
+from pic4free.models.super_resolution import SUPIRRestoreFormer
 
 logger = logging.getLogger("Pic4Free.Pipeline")
 
@@ -244,7 +244,7 @@ class Pic4FreeRestorationPipeline:
                 self.mask_generator.model.to(self.host_device)
             else:
                 mask = None
-                logger.info("[STAGE 1] BEN omitido (enable_ben_debug=false).")
+                logger.info("[STAGE 1] BEN skipped (enable_ben_debug=false).")
 
             # Inpainting mask = watermark area (clean thumb vs
             # watermarked). the BEN mask (full silhouette) is NOT used for
@@ -400,7 +400,7 @@ class Pic4FreeRestorationPipeline:
                 try:
                     self.inpainter.unload()
                 except Exception as _e:
-                    logger.warning(f"Unload Stage 3 omitido ({_e}).")
+                    logger.warning(f"Stage 3 unload skipped ({_e}).")
 
             # ---------------------------------------------------------
             # Stage 4: Super-Resolution
@@ -419,13 +419,17 @@ class Pic4FreeRestorationPipeline:
                 except Exception as _e:
                     logger.warning(f"[STAGE 4] pre-assignment skipped: {_e}")
 
-                self.super_res.face_restorer.to(self.active_device)
-                self.super_res.supir_model.to(self.active_device)
+                if self.super_res.face_restorer is not None:
+                    self.super_res.face_restorer.to(self.active_device)
+                if self.super_res.supir_model is not None:
+                    self.super_res.supir_model.to(self.active_device)
 
                 final_image = self.super_res.upscale(restored_image, faces_detail=pre_faces)
 
-                self.super_res.face_restorer.to(self.host_device)
-                self.super_res.supir_model.to(self.host_device)
+                if self.super_res.face_restorer is not None:
+                    self.super_res.face_restorer.to(self.host_device)
+                if self.super_res.supir_model is not None:
+                    self.super_res.supir_model.to(self.host_device)
 
 
                 logger.info(f"Stage 4 completada in {time.time() - t0:.2f}s")
@@ -449,7 +453,7 @@ class Pic4FreeRestorationPipeline:
                             f"cos={_a['cosine']:.3f} threshold={thr}"
                         )
                         if _a["cosine"] < thr:
-                            logger.warning(_msg + " -> BAJO UMBRAL, revisar identity.")
+                            logger.warning(_msg + " -> BELOW THRESHOLD; review identity.")
                         else:
                             logger.info(_msg + " -> OK.")
                     if not identity_metric.get("assignment"):

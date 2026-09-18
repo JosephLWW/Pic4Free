@@ -13,7 +13,7 @@
 set -Eeuo pipefail
 
 echo "=============================================================================="
-echo "Iniciando Job Individual Pic4Free"
+echo "Starting Pic4Free individual job"
 echo "Date and Time: $(date '+%Y-%m-%d %H:%M:%S')"
 echo "=============================================================================="
 
@@ -34,7 +34,7 @@ WORKDIR="${SLURM_SUBMIT_DIR:?SLURM_SUBMIT_DIR is not defined}"
 WORKDIR="$(cd "${WORKDIR}" && pwd)"
 
 # Validate the minimum repository structure
-for required in "requirements.txt" "src/main.py"; do
+for required in "requirements.txt" "src/pic4free/core/main.py"; do
     if [[ ! -e "${WORKDIR}/${required}" ]]; then
         echo "ERROR: missing ${required} inside of ${WORKDIR}" >&2
         exit 1
@@ -42,6 +42,7 @@ for required in "requirements.txt" "src/main.py"; do
 done
 
 cd "${WORKDIR}"
+export PYTHONPATH="${WORKDIR}/src:${PYTHONPATH:-}"
 
 # Use temporary storage or Scratch, not the project quota
 if [[ -z "${PIC4FREE_CACHE_ROOT:-}" && -z "${SCRATCH:-}" && -z "${TMPDIR:-}" ]]; then
@@ -60,7 +61,12 @@ mkdir -p \
 export HF_HOME="${CACHE_ROOT}/huggingface"
 export HUGGINGFACE_HUB_CACHE="${HF_HOME}/hub"
 export TRANSFORMERS_CACHE="${HF_HOME}/transformers"
-export HF_TOKEN="$(cat ${WORKDIR}/hf_token.txt)"
+if [[ -f "${WORKDIR}/hf_token.txt" ]]; then
+    export HF_TOKEN="$(<"${WORKDIR}/hf_token.txt")"
+else
+    unset HF_TOKEN
+    echo "[Pic4Free] WARNING: hf_token.txt not found; gated model downloads may fail." >&2
+fi
 export TORCH_HOME="${CACHE_ROOT}/torch"
 export INSIGHTFACE_HOME="${CACHE_ROOT}/insightface"
 export PIP_NO_CACHE_DIR=1
@@ -98,7 +104,7 @@ print('LoRA ${_P} OK: ${_DST} with', len(ks), 'tensors')
 assert len(ks) > 100, 'checkpoint suspiciously small'
 " || echo "[Pic4Free] WARNING: LoRA ${_P} not verifiable; generic refinement."
     else
-        echo "[Pic4Free] No LoRA ${_P}: refino facial generic."
+        echo "[Pic4Free] No LoRA ${_P}: using generic face refinement."
     fi
 done
 
@@ -210,7 +216,7 @@ echo "[Pic4Free] Venv lock released."
 
 # Determine whether SUPIR upscaling is enabled in the config
 ENABLE_UPSCALING="$("${PYTHON_BIN}" - <<'PY'
-from src.config import load_config
+from pic4free.core.config import load_config
 cfg = load_config()
 print("true" if cfg.superres.enable_upscaling else "false")
 PY
@@ -249,14 +255,14 @@ else
     echo "[Pic4Free] SUPIR upscaling disabled; skipping package verification."
 fi
 
-echo "[Pic4Free] Verificando PyTorch/CUDA..."
+echo "[Pic4Free] Verifying PyTorch/CUDA..."
 "${PYTHON_BIN}" - <<'PY'
 import torch
 print(f"PyTorch: {torch.__version__}")
 print(f"CUDA available: {torch.cuda.is_available()}")
 if torch.cuda.is_available():
     print(f"GPU: {torch.cuda.get_device_name(0)}")
-    print(f"Capacidad: {torch.cuda.get_device_capability(0)}")
+    print(f"Compute capability: {torch.cuda.get_device_capability(0)}")
     print(f"CUDA runtime: {torch.version.cuda}")
 PY
 
@@ -275,7 +281,7 @@ mkdir -p "${OUTPUT_BASE}/restored" \
 echo "=============================================================================="
 echo "Job ID:            ${SLURM_JOB_ID}"
 echo "Task ID (Index):  ${TASK_ID}"
-echo "Nodo:              ${SLURMD_NODENAME}"
+echo "Node:              ${SLURMD_NODENAME}"
 echo "Python:            $("${PYTHON_BIN}" -c 'import sys; print(sys.executable)')"
 echo "GPU:               $("${PYTHON_BIN}" -c 'import torch; print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else "ERROR: without GPU")')"
 echo "Output Directory: ${OUTPUT_BASE}"
@@ -295,7 +301,7 @@ if [[ -f "${HF_TOKEN_FILE}" ]]; then
     EXTRA_ARGS+=("flux.hf_token_file=${HF_TOKEN_FILE}")
 fi
 
-"${PYTHON_BIN}" src/main.py \
+"${PYTHON_BIN}" -m pic4free.core.main \
     task_id="${TASK_ID}" \
     job_id="${JOB_ID}" \
     paths.input_dir="${WORKDIR}/data/input" \

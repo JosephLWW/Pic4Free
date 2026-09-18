@@ -1,6 +1,6 @@
 #!/bin/bash
 # LoRA DreamBooth native diffusers (pipeline venv: torch+diffusers+peft).
-# Uso: sbatch slurm/train_dreambooth.sh <A|B> <steps> <rank> [tag]
+# Usage: sbatch slurm/train_dreambooth.sh <A|B> <steps> <rank> [tag]
 #SBATCH --job-name=Pic4Free_dblora
 #SBATCH --output=slurm_logs/slurm_%j.out
 #SBATCH --error=slurm_logs/slurm_%j.err
@@ -29,6 +29,7 @@ TAG="${4:-${PERSON}}"
 WORKDIR="${SLURM_SUBMIT_DIR:?SLURM_SUBMIT_DIR is not defined}"
 WORKDIR="$(cd "${WORKDIR}" && pwd)"
 cd "${WORKDIR}"
+export PYTHONPATH="${WORKDIR}/src:${PYTHONPATH:-}"
 
 CACHE_ROOT="${PIC4FREE_CACHE_ROOT:-${SCRATCH:-${TMPDIR}}}"
 CACHE_ROOT="${CACHE_ROOT}/pic4free/${USER}"
@@ -51,7 +52,12 @@ if [[ "${PERSON}" == "A" ]]; then TRIGGER="P4F_A"; else TRIGGER="P4F_B"; fi
 
 export HF_HOME="${CACHE_ROOT}/huggingface"
 export HUGGINGFACE_HUB_CACHE="${HF_HOME}/hub"
-export HF_TOKEN="$(cat ${WORKDIR}/hf_token.txt)"
+if [[ -f "${WORKDIR}/hf_token.txt" ]]; then
+    export HF_TOKEN="$(<"${WORKDIR}/hf_token.txt")"
+else
+    unset HF_TOKEN
+    echo "[dblora] WARNING: hf_token.txt not found; gated model downloads may fail." >&2
+fi
 export PIP_NO_CACHE_DIR=1
 export PYTHONUNBUFFERED=1
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
@@ -76,7 +82,7 @@ echo "[dblora] staging: $(ls "${STAGE_DIR}" | wc -l) images in ${STAGE_DIR}"
 
 # shellcheck disable=SC2086
 "${PYTHON_BIN}" -m accelerate.commands.launch --mixed_precision=bf16 \
-    scripts/train_dreambooth_lora_flux.py \
+    -m pic4free.training.train_dreambooth_lora_flux \
     --pretrained_model_name_or_path="black-forest-labs/FLUX.1-dev" \
     --instance_data_dir="${STAGE_DIR}" \
     --instance_prompt="${TRIGGER} portrait photo, face and shoulders, natural light, photorealistic" \

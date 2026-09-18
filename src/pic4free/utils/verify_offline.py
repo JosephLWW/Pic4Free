@@ -5,8 +5,8 @@ For each run/task: detects up to 2 faces in the final PNG and computes the matri
 cosine matrix against references A and B SEPARATELY (no averaged), with
 greedy assignment. Prints a table and saves JSON.
 
-Uso:
-    python src/verify_offline.py --runs data/output/run_X ... \
+Usage:
+    python -m pic4free.utils.verify_offline --runs data/output/run_X ... \
         --a-dir data/identity_person_A --b-dir data/identity_person_B \
         --tasks 0 53 --out data/output/verify_summary.json
 """

@@ -514,7 +514,7 @@ class SUPIRRestoreFormer:
         self.refine_backend = str(getattr(sr, "face_refine_backend", "lora")).lower() if sr is not None else "lora"
 
         logger.info(
-            f"Inicializando Stage 4 (backend refino={self.refine_backend}) "
+            f"Initializing Stage 4 (refinement backend={self.refine_backend}) "
             f"on {device}"
         )
 
@@ -527,20 +527,12 @@ class SUPIRRestoreFormer:
                 with open(token_path, "r") as f:
                     hf_token = f.read().strip() or None
         self.hf_token = hf_token
+        self.face_restorer = None
+        self.supir_model = None
 
         try:
-            logger.info("Loading RestoreFormer++ (ONNX) into RAM...")
-            self.face_restorer = RestoreFormerONNX(hf_token=hf_token)
-
-            logger.info("Downloading and preparando SUPIR-v0Q...")
-            self.supir_model = SUPIRUpscaler(
-                scale_factor=scale_factor,
-                device=device,
-                hf_token=hf_token,
-            )
-
-            # Refino LoRA: construccion ligera (the DiT img2img is lazy loading in
-            # the first upscale for no penalizar runs that no lo use).
+            # LoRA refinement: lightweight construction; the DiT img2img model
+            # loads lazily on the first upscale.
             g = (lambda k, d: getattr(sr, k, d)) if sr is not None else (lambda k, d: d)
             self.lora_refiner = FaceLoRAUpscaler(
                 flux_model_id=g("flux_model_id", "black-forest-labs/FLUX.1-dev"),
@@ -559,9 +551,23 @@ class SUPIRRestoreFormer:
                 refine_unassigned=g("refine_unassigned", True),
             )
 
+            if self.refine_backend != "lora":
+                self._ensure_legacy_models()
         except Exception as e:
             logger.error(f"Error initializing Super-Resolution models: {e}")
             raise
+
+    def _ensure_legacy_models(self):
+        if self.face_restorer is None:
+            logger.info("Loading RestoreFormer++ (ONNX) into RAM...")
+            self.face_restorer = RestoreFormerONNX(hf_token=self.hf_token)
+        if self.supir_model is None:
+            logger.info("Downloading and preparing SUPIR-v0Q...")
+            self.supir_model = SUPIRUpscaler(
+                scale_factor=self.scale_factor,
+                device=self.device,
+                hf_token=self.hf_token,
+            )
 
     @torch.no_grad()
     def upscale(self, image: Image.Image, faces_detail: Optional[Dict[str, Any]] = None) -> Image.Image:
@@ -571,7 +577,7 @@ class SUPIRRestoreFormer:
         with backend "lora": HD + refinement facial by LoRA (ignora RestoreFormer).
         """
         if self.refine_backend == "lora":
-            logger.info("Aplicando FaceLoRAUpscaler (HD + refinement by face)...")
+            logger.info("Applying FaceLoRAUpscaler (HD + per-face refinement)...")
             try:
                 return self.lora_refiner.upscale_hd(image, faces_detail)
             except torch.cuda.OutOfMemoryError:
@@ -581,9 +587,10 @@ class SUPIRRestoreFormer:
                 logger.error(f"Error in FaceLoRA, falling back to RestoreFormer++: {e}")
                 # Continue below with the legacy path.
 
-        logger.info("Aplicando RestoreFormer++ + SUPIR...")
+        logger.info("Applying RestoreFormer++ + SUPIR...")
 
         try:
+            self._ensure_legacy_models()
             # 1. Restaurar detalles faciales with RestoreFormer++ (ONNX)
             logger.info("[Stage 4.1] RestoreFormer++ face restoration...")
             in_arr = np.array(image.convert("RGB"), dtype=np.float32)
@@ -607,7 +614,7 @@ class SUPIRRestoreFormer:
                 target_size = (width * self.scale_factor, height * self.scale_factor)
                 image = self.supir_model.upscale(image, target_size=target_size)
             else:
-                logger.info("[Stage 4.2] SUPIR upscaling omitido (enable_upscaling=False).")
+                logger.info("[Stage 4.2] SUPIR upscaling skipped (enable_upscaling=False).")
 
             return image
 

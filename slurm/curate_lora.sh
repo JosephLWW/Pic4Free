@@ -22,6 +22,7 @@ module load devel/python/3.12.3-gnu-14.2
 WORKDIR="${SLURM_SUBMIT_DIR:?SLURM_SUBMIT_DIR is not defined}"
 WORKDIR="$(cd "${WORKDIR}" && pwd)"
 cd "${WORKDIR}"
+export PYTHONPATH="${WORKDIR}/src:${PYTHONPATH:-}"
 
 if [[ -z "${PIC4FREE_CACHE_ROOT:-}" && -z "${SCRATCH:-}" && -z "${TMPDIR:-}" ]]; then
     echo "ERROR: SCRATCH/TMPDIR does not exist for caches." >&2
@@ -55,7 +56,7 @@ fi
 
 mkdir -p data/lora
 
-"${PYTHON_BIN}" src/curate_lora.py \
+"${PYTHON_BIN}" -m pic4free.cli.curate_lora \
     --a-dir "${WORKDIR}/data/identity_person_A" \
     --b-dir "${WORKDIR}/data/identity_person_B" \
     --out "${WORKDIR}/data/lora" \

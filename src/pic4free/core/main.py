@@ -15,8 +15,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from src.config import load_config
-from src.pipeline import Pic4FreeRestorationPipeline
+from pic4free.core.config import load_config
+from pic4free.core.pipeline import Pic4FreeRestorationPipeline
 
 # Configure logging
 logging.basicConfig(

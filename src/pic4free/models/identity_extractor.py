@@ -9,7 +9,7 @@ import torch.nn.functional as F
 from PIL import Image
 from torchvision import transforms
 
-from src.modules.pulid_official import IDFormer
+from pic4free.models.pulid_official import IDFormer
 
 logger = logging.getLogger("Pic4Free.IdentityExtractor")
 

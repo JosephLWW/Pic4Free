@@ -22,6 +22,7 @@ module load devel/python/3.12.3-gnu-14.2
 WORKDIR="${SLURM_SUBMIT_DIR:?SLURM_SUBMIT_DIR is not defined}"
 WORKDIR="$(cd "${WORKDIR}" && pwd)"
 cd "${WORKDIR}"
+export PYTHONPATH="${WORKDIR}/src:${PYTHONPATH:-}"
 
 CACHE_ROOT="${PIC4FREE_CACHE_ROOT:-${SCRATCH:-${TMPDIR}}}"
 CACHE_ROOT="${CACHE_ROOT}/pic4free/${USER}"
@@ -40,13 +41,13 @@ if [[ ! -f "${REQ_HASH_FILE}" || "$(cat "${REQ_HASH_FILE}" 2>/dev/null || echo)"
     "${PYTHON_BIN}" -m pip install --disable-pip-version-check --no-cache-dir -r "${WORKDIR}/requirements.txt"
 fi
 
-# Uso: sbatch slurm/check_lora.sh [out.json] [files...] (defecto: weights/)
+# Usage: sbatch slurm/check_lora.sh [out.json] [files...] (default: weights/)
 OUT_JSON="${1:-data/output/lora_audit.json}"
 shift || true
 if [[ $# -eq 0 ]]; then
     set -- weights/lora_person_A.safetensors weights/lora_person_B.safetensors
 fi
 
-"${PYTHON_BIN}" src/check_lora_weights.py \
+"${PYTHON_BIN}" -m pic4free.cli.check_lora_weights \
     --weights "$@" \
     --out "${OUT_JSON}"

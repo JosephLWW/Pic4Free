@@ -55,7 +55,7 @@ class FluxConfig:
     use_inpaint_pipeline: bool = True  # latent blending with a mask; if false, T2I+composite with warning
     # Backend of editing: "flux" (FLUX.1-dev + latent blending with a mask) or
     # "kontext" (FLUX.1-Kontext-dev, editing instruction-based native, without mask).
-    backend: str = "flux"
+    backend: str = "kontext"
     kontext_model_id: str = "black-forest-labs/FLUX.1-Kontext-dev"
     edit_instruction: str = (
         "Remove the semi-transparent white repeating text watermark pattern "

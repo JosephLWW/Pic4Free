@@ -10,7 +10,7 @@ from huggingface_hub import hf_hub_download
 from safetensors.torch import load_file
 from diffusers import DiffusionPipeline
 
-from src.modules.pulid_official import IDFormer, PerceiverAttentionCA
+from pic4free.models.pulid_official import IDFormer, PerceiverAttentionCA
 
 logger = logging.getLogger("Pic4Free.FluxInpainter")
 

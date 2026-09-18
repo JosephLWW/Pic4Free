@@ -9,8 +9,8 @@ For each A/B image, reports:
 Verdict per image: KEEP / REVIEW / DROP + reason.
 Filters enabled via CLI (see --help). Does not delete anything; only reports.
 
-Uso:
-    python src/audit_dataset.py --a-dir data/identity_person_A \
+Usage:
+    python -m pic4free.cli.audit_dataset --a-dir data/identity_person_A \
         --b-dir data/identity_person_B --out data/lora \
         --min-face-frac 0.02 --blur-min 40.0 --cos-min 0.35
 """

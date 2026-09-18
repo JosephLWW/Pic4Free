@@ -54,14 +54,14 @@ InsightFace detection + ArcFace-512 embeddings per reference gallery, with a **r
 3. Legacy `RestoreFormer++` (ONNX) and SUPIR paths remain behind `face_refine_backend: "restoreformer"` / `enable_upscaling`.
 
 ## 3. Identity metric protocol
-- **Method**: ArcFace (InsightFace `buffalo_l`) cosine between each detected face of the final image and each gallery mean (computed identically offline in `src/utils/verify_offline.py`).
-- **Assignment**: greedy max, no repeats. **Threshold**: 0.4 → `OK`, else `BAJO UMBRAL` warning (never fails the pipeline).
+- **Method**: ArcFace (InsightFace `buffalo_l`) cosine between each detected face of the final image and each gallery mean (computed identically offline in `src/pic4free/utils/verify_offline.py`).
+- **Assignment**: greedy max, no repeats. **Threshold**: 0.4 → `OK`, otherwise a `BELOW THRESHOLD` warning (never fails the pipeline).
 - **Artifact**: `metrics/task_N_identity.json` with backend, confidences, selection, pre/post assignments.
 
 ## 4. Train your own LoRA (per-person, ~1 h on H100)
 Identity LoRAs are personal: the repo ships tools, not weights (`weights/*.safetensors` is git-ignored).
 1. **Curate**: `sbatch slurm/curate_lora.sh` → face+shoulder square crops + `P4F_X` captions + 2 hardest faces held out (`data/lora/`, `manifest.json`). Audit first with `sbatch slurm/audit_dataset.sh` (blur, size, identity outliers, duplicates).
-2. **Train** (diffusers-native DreamBooth, vendored in `scripts/`): `sbatch slurm/train_dreambooth.sh B 1000 8 myrun` (person, steps, rank). Checkpoints mirror to shared storage automatically; resume works across nodes/jobs.
+2. **Train** (diffusers-native DreamBooth, isolated under `src/pic4free/training/`): `sbatch slurm/train_dreambooth.sh B 1000 8 myrun` (person, steps, rank). Checkpoints mirror to shared storage automatically; resume works across nodes/jobs.
 3. **Select**: `sbatch slurm/check_lora.sh` — rejects NaN/zero-init weights (a silent failure mode we hit: 43M NaNs from a crashed run) and reports norms; pick by held-out cosine.
 4. **Deploy**: copy the winner to `weights/lora_person_{A,B}.safetensors` — the upscaler loads it with a finiteness gate.
 - Reference points: rank 8–16, lr 1e-4, bf16, no prior preservation; B (10 photos) overfits past ~1000 steps — watch samples.
@@ -70,25 +70,34 @@ Identity LoRAs are personal: the repo ships tools, not weights (`weights/*.safet
 ```text
 Pic4Free/
 ├── src/
-│   ├── main.py                    # CLI entry (OmegaConf dotlist args)
-│   ├── pipeline.py                # 4-stage orchestrator + metrics
-│   ├── config.py                  # all knobs (table below)
-│   ├── modules/
-│   │   ├── mask_generator.py      # BEN2 (debug only)
-│   │   ├── identity_extractor.py  # InsightFace/ArcFace + EVA-CLIP + official IDFormer
-│   │   ├── flux_inpainter.py      # Kontext / FLUX.1 paths (+ dormant PuLID wrap)
-│   │   ├── super_resolution.py    # FaceLoRAUpscaler, RestoreFormer++, SUPIR
-│   │   └── pulid_official.py      # vendored PuLID-FLUX modules (dormant)
-│   ├── utils/verify_offline.py    # batch identity audit without GPU
-│   ├── audit_dataset.py           # gallery audit (blur/size/outliers/dupes)
-│   ├── curate_lora.py             # face+shoulder crops + captions + held-out
-│   └── check_lora_weights.py      # NaN/zero-init gate for checkpoints
-├── scripts/train_dreambooth_lora_flux.py  # vendored diffusers trainer (v0.40.0)
+│   ├── __init__.py
+│   └── pic4free/
+│       ├── __init__.py
+│       ├── core/
+│       │   ├── config.py          # structured OmegaConf configuration
+│       │   ├── main.py            # module-based CLI entrypoint
+│       │   └── pipeline.py        # four-stage orchestrator + metrics
+│       ├── models/
+│       │   ├── mask_generator.py  # BEN2 debug segmentation
+│       │   ├── identity_extractor.py # InsightFace/ArcFace + EVA-CLIP
+│       │   ├── flux_inpainter.py  # Kontext / FLUX.1 editing paths
+│       │   ├── super_resolution.py # FaceLoRA, RestoreFormer++, SUPIR
+│       │   └── pulid_official.py  # isolated PuLID-FLUX adapter
+│       ├── utils/
+│       │   └── verify_offline.py  # batch identity audit without GPU
+│       ├── cli/
+│       │   ├── audit_dataset.py   # gallery audit
+│       │   ├── curate_lora.py     # face crops, captions, held-out split
+│       │   └── check_lora_weights.py # NaN/zero-init checkpoint gate
+│       └── training/
+│           └── train_dreambooth_lora_flux.py # vendored diffusers trainer
 ├── slurm/
-│   ├── restore_single.sh  # one task: sbatch ... 0 kontext 1.0 true average
-│   ├── restore_array.sh   # full sweep: sbatch ... (array 0-96)
-│   ├── curate_lora.sh / audit_dataset.sh / check_lora.sh   # CPU jobs
-│   └── train_dreambooth.sh  # GPU LoRA training (own venv)
+│   ├── restore_single.sh    # one production task
+│   ├── restore_array.sh     # array production sweep
+│   ├── curate_lora.sh       # CPU curation job
+│   ├── audit_dataset.sh     # CPU identity-gallery audit
+│   ├── check_lora.sh        # CPU checkpoint validation
+│   └── train_dreambooth.sh  # GPU LoRA training job
 ├── weights/               # .gitkeep + YOUR safetensors (never committed)
 ├── docs/                  # header before/after JPGs (tracked)
 ├── data/                  # NOT tracked: bring your own dataset
@@ -113,7 +122,7 @@ sbatch slurm/restore_array.sh
 sbatch --array=42 slurm/restore_array.sh
 ```
 
-`main.py` takes OmegaConf dotlist args (`task_id=0 job_id=x paths.input_dir=... flux.backend=kontext ...`); every `.sh` flag maps 1:1 to the table below. First run per node downloads ~45 GB of weights (slow once, then cached).
+The application entrypoint is `python -m pic4free.core.main` with `PYTHONPATH=src`, and it takes OmegaConf dotlist args (`task_id=0 job_id=x paths.input_dir=... flux.backend=kontext ...`). The Slurm wrappers set `PYTHONPATH` and invoke the same module entrypoint. First run per node downloads ~45 GB of weights (slow once, then cached).
 
 ### Outputs per task
 - `restored/task_N_restored.png` — post-edit, pre-upscale (first-class result).
@@ -123,7 +132,7 @@ sbatch --array=42 slurm/restore_array.sh
 - `logs/` — Slurm log copies.
 
 ## 7. Configuration reference
-All fields live in `src/config.py` (OmegaConf-mergeable from CLI as `section.field=value`):
+All fields live in `src/pic4free/core/config.py` (OmegaConf-mergeable from CLI as `section.field=value`):
 
 | Key | Type | Default | What it does |
 |---|---|---|---|
@@ -145,7 +154,7 @@ All fields live in `src/config.py` (OmegaConf-mergeable from CLI as `section.fie
 | `identity.injection` | str | `none` | `pulid` reactivates dormant injection (needs full biometrics) |
 | `identity.metric_only` | bool | true | Skip EVA+IDFormer (~4 min/task); ArcFace-only audit |
 | `flux.model_id` | str | `black-forest-labs/FLUX.1-dev` | Base for img2img refinement |
-| `flux.backend` | str | `flux` | `kontext` = production path (CLI passes it explicitly) |
+| `flux.backend` | str | `kontext` | Production instruction-based editing path; `flux` is the legacy diagnostic path |
 | `flux.kontext_model_id` | str | `black-forest-labs/FLUX.1-Kontext-dev` | Instruction-based editor |
 | `flux.edit_instruction` | str | (see config) | Watermark-removal instruction, framing-preserving |
 | `flux.num_inference_steps` | int | 35 | Denoising steps (Kontext path) |
@@ -184,5 +193,5 @@ All fields live in `src/config.py` (OmegaConf-mergeable from CLI as `section.fie
 
 ## 10. Tooling map (where to look next)
 - New identity to enroll → `audit_dataset.sh` → `curate_lora.sh` → `train_dreambooth.sh` → `check_lora.sh` → drop into `weights/` → production `restore_array.sh`.
-- Suspect a run → `restored/` PNGs → `metrics/*_identity.json` → Slurm log (`_flush_memory`, `[MÉTRICA]`, `[FaceLoRA]`, `[SELECCIÓN]` markers).
+- Suspect a run → `restored/` PNGs → `metrics/*_identity.json` → Slurm log (`_flush_memory`, `[METRIC]`, `[FaceLoRA]`, `[SELECTION]` markers).
 - Reproduce anything → fixed `seed: 42` + logged effective config per run.

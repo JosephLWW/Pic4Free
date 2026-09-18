@@ -12,8 +12,8 @@ For each identity directory (A/B):
 Output:
   data/lora/train_{A,B}/, data/lora/heldout_{A,B}/, data/lora/manifest.json
 
-Uso:
-    python src/curate_lora.py --a-dir data/identity_person_A \
+Usage:
+    python -m pic4free.cli.curate_lora --a-dir data/identity_person_A \
         --b-dir data/identity_person_B --out data/lora \
         --trigger-a P4F_A --trigger-b P4F_B
 """
@@ -87,9 +87,9 @@ def curate(app, src_dir, dst_train, dst_held, trigger, held_n=2, freeze=None):
             print(f"  [skip] {name}: recorte degenerado", flush=True)
             continue
         found.append({"src": name, "crop": img.crop(box), "area": area(best)})
-    # Held-out: by default the of face most small (hard cases); if exists
-    # previous manifest with --freeze-heldout, is preserve esos files for
-    # so cosines are comparable across dataset versions.
+    # Held-out: by default, reserve the smallest faces (hard cases). If a
+    # previous manifest is supplied with --freeze-heldout, preserve those files
+    # so cosines remain comparable across dataset versions.
     frozen = set(freeze or [])
     if frozen:
         held = [d for d in found if os.path.splitext(d["src"])[0] in frozen]
@@ -145,7 +145,7 @@ def main():
                 prev[label] = set(old.get(label, {}).get("heldout_files", []))
             print(f"[curate] held-out frozen: { {k: sorted(v) for k, v in prev.items()} }", flush=True)
         except Exception as e:
-            print(f"[curate] without previous manifest usesble ({e}); new selection.", flush=True)
+            print(f"[curate] previous manifest unavailable ({e}); using new selection.", flush=True)
     manifest = {}
     for label, src, trig in (("A", args.a_dir, args.trigger_a), ("B", args.b_dir, args.trigger_b)):
         print(f"[curate] {label}: {src}", flush=True)
